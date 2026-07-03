@@ -10,7 +10,7 @@ import {
   type ViewUpdate,
 } from "@codemirror/view";
 import { HighlightStyle, syntaxTree } from "@codemirror/language";
-import { RangeSetBuilder } from "@codemirror/state";
+import { RangeSetBuilder, StateField, type EditorState } from "@codemirror/state";
 import { tags as t } from "@lezer/highlight";
 
 // Transparent chrome so the frosted card shows through; inherit the app font.
@@ -35,6 +35,26 @@ export const noteTheme = EditorView.theme({
   "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection": {
     backgroundColor: "color-mix(in srgb, var(--accent) 24%, transparent)",
   },
+  // Inline `code` — a rounded pill so it stands out from body text.
+  ".cm-inline-code": {
+    background: "var(--code-bg)",
+    borderRadius: "5px",
+    padding: "0.1em 0.35em",
+    boxDecorationBreak: "clone",
+    WebkitBoxDecorationBreak: "clone",
+  },
+  // Fenced ``` code blocks — full-width tinted band, rounded at the ends.
+  ".cm-code-block": { background: "var(--code-bg)" },
+  ".cm-code-block.cm-code-first": {
+    borderTopLeftRadius: "8px",
+    borderTopRightRadius: "8px",
+  },
+  ".cm-code-block.cm-code-last": {
+    borderBottomLeftRadius: "8px",
+    borderBottomRightRadius: "8px",
+  },
+  // Empty ``` delimiter lines: a thin tinted strip instead of a full row.
+  ".cm-code-block.cm-code-fence": { fontSize: "0", lineHeight: "10px" },
 });
 
 export const noteHighlight = HighlightStyle.define([
@@ -84,6 +104,10 @@ function buildDecorations(view: EditorView): DecorationSet {
       to,
       enter(node) {
         if (!HIDE_MARKS.has(node.name)) return;
+        // Fenced-code backticks live on their own line, which the code plugin
+        // collapses wholesale — hiding them here too would overlap-replace.
+        if (node.name === "CodeMark" && node.node.parent?.name === "FencedCode")
+          return;
         const line = state.doc.lineAt(node.from);
         if (onActiveLine(line.from, line.to)) return;
         // For headers/quotes, swallow the single space after the mark too.
@@ -115,3 +139,66 @@ export const livePreview = ViewPlugin.fromClass(
   },
   { decorations: (v) => v.decorations },
 );
+
+// ---- Code backgrounds: tint inline `code` and fenced ``` blocks -----------
+const inlineCode = Decoration.mark({ class: "cm-inline-code" });
+
+const isFenceLine = (text: string) => /^\s{0,3}(`{3,}|~{3,})/.test(text);
+
+// One tinted band line. `fenceInactive` shrinks the empty ``` delimiter lines
+// to a thin strip, so the band reads as padding rather than full empty rows.
+function lineDeco(isFirst: boolean, isLast: boolean, fenceInactive: boolean) {
+  let cls = "cm-code-block";
+  if (isFirst) cls += " cm-code-first";
+  if (isLast) cls += " cm-code-last";
+  if (fenceInactive) cls += " cm-code-fence";
+  return Decoration.line({ class: cls });
+}
+
+function buildCodeDecorations(state: EditorState): DecorationSet {
+  const sel = state.selection;
+  const doc = state.doc;
+  const ranges: ReturnType<Decoration["range"]>[] = [];
+  const onActiveLine = (from: number, to: number) =>
+    sel.ranges.some((r) => r.from <= to && r.to >= from);
+
+  syntaxTree(state).iterate({
+    from: 0,
+    to: doc.length,
+    enter(node) {
+      if (node.name === "InlineCode") {
+        ranges.push(inlineCode.range(node.from, node.to));
+        return;
+      }
+      if (node.name !== "FencedCode" && node.name !== "CodeBlock") return;
+
+      const startNum = doc.lineAt(node.from).number;
+      const endNum = doc.lineAt(Math.max(node.from, node.to - 1)).number;
+      const fenced = node.name === "FencedCode";
+
+      for (let n = startNum; n <= endNum; n++) {
+        const line = doc.line(n);
+        const isFirst = n === startNum;
+        const isLast = n === endNum;
+        // Opening line is always a fence; closing line only if it looks like
+        // one (an unclosed block's last line is really content).
+        const isFence =
+          fenced && (isFirst || (isLast && isFenceLine(line.text)));
+        const fenceInactive = isFence && !onActiveLine(line.from, line.to);
+        ranges.push(lineDeco(isFirst, isLast, fenceInactive).range(line.from));
+      }
+    },
+  });
+  return Decoration.set(ranges, true);
+}
+
+// A StateField keyed on selection so fence lines expand back to full height
+// when the cursor lands on them (to edit the ``` or its language).
+export const codeBackground = StateField.define<DecorationSet>({
+  create: (state) => buildCodeDecorations(state),
+  update(deco, tr) {
+    if (tr.docChanged || tr.selection) return buildCodeDecorations(tr.state);
+    return deco;
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});

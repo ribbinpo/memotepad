@@ -6,7 +6,7 @@ import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { markdown } from "@codemirror/lang-markdown";
 import { EditorView } from "@codemirror/view";
 import { syntaxHighlighting } from "@codemirror/language";
-import { noteTheme, noteHighlight, livePreview } from "./editor";
+import { noteTheme, noteHighlight, livePreview, codeBackground } from "./editor";
 import "./App.css";
 
 const editorExtensions = [
@@ -15,6 +15,7 @@ const editorExtensions = [
   noteTheme,
   syntaxHighlighting(noteHighlight),
   livePreview,
+  codeBackground,
 ];
 
 const toolbarBtn =
