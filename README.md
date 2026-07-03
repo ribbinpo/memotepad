@@ -2,7 +2,7 @@
   <img src="src-tauri/app-icon.png" alt="memonotepad app icon" width="140" height="140">
 </p>
 
-<h1 align="center">memonotepad</h1>
+<h1 align="center">Memonotepad</h1>
 
 <p align="center">
   A tiny, always-on-top Markdown scratchpad for macOS — summon it with a<br>
@@ -16,7 +16,21 @@
   <img src="https://img.shields.io/badge/React-19-149ECA?logo=react&logoColor=white" alt="React 19">
 </p>
 
-memonotepad is a Raycast/Spotlight-style floating note. It lives in your menu bar, appears on top of any app — even fullscreen ones — when you hit the global shortcut, and disappears just as fast. Everything you type is plain Markdown, saved instantly to local `.md` files. There's no "edit mode" and no "preview mode": Markdown styles itself live as you type, the way Notion and Raycast Notes work.
+Memonotepad is a Raycast/Spotlight-style floating note. It lives in your menu bar, appears on top of any app — even fullscreen ones — when you hit the global shortcut, and disappears just as fast. Everything you type is plain Markdown, saved instantly to local `.md` files. There's no "edit mode" and no "preview mode": Markdown styles itself live as you type, the way Notion and Raycast Notes work.
+
+---
+
+## ⬇️ Download
+
+| Build | For | |
+| --- | --- | --- |
+| **Apple Silicon** | M1 / M2 / M3 / M4 Macs | [Download .dmg](https://r2-dev.ribbinpo.dev/memotepad/memonotepad-0.1.0-apple-silicon.dmg) |
+| **Universal** | Apple Silicon **and** Intel Macs | [Download .dmg](https://r2-dev.ribbinpo.dev/memotepad/memonotepad_0.1.0_universal.dmg) |
+
+> **First launch:** memonotepad isn't code-signed yet, so macOS Gatekeeper will warn you. After dragging the app to **Applications**, right-click it → **Open** → **Open**. If macOS says the app is "damaged," open Terminal and run:
+> ```bash
+> xattr -dr com.apple.quarantine /Applications/memonotepad.app
+> ```
 
 ---
 
