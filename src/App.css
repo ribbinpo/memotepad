@@ -1,3 +1,19 @@
+@import "tailwindcss";
+
+/* Expose the runtime design tokens below as Tailwind utilities
+   (bg-card, text-card-fg, text-muted, border-rule, text-accent, …).
+   `inline` keeps them referencing the vars, so the dark-mode overrides
+   and JS-driven values flow through automatically. */
+@theme inline {
+  --color-card: var(--card-bg);
+  --color-card-fg: var(--card-fg);
+  --color-muted: var(--muted);
+  --color-rule: var(--rule);
+  --color-accent: var(--accent);
+  --color-bar: var(--bar-bg);
+  --color-hover: var(--hover);
+}
+
 :root {
   color-scheme: light dark;
   font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
@@ -44,190 +60,5 @@ body,
 /* Inset so the transparent window reveals the card's rounded corners + shadow. */
 #root {
   box-sizing: border-box;
-  padding: 8px;
-}
-
-.wrap {
-  height: 100%;
-  opacity: var(--opacity, 1);
-  transition: opacity 0.12s ease;
-}
-
-/* The single floating surface — a frosted glass panel. */
-.card {
-  box-sizing: border-box;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  border-radius: 13px;
-  background: var(--card-bg);
-  color: var(--card-fg);
-  -webkit-backdrop-filter: blur(30px) saturate(180%);
-  backdrop-filter: blur(30px) saturate(180%);
-  box-shadow:
-    0 10px 40px rgba(0, 0, 0, 0.24),
-    0 1px 3px rgba(0, 0, 0, 0.12),
-    inset 0 0 0 0.5px var(--ring),
-    inset 0 0.5px 0 0.5px var(--hi);
-  overflow: hidden;
-  -webkit-font-smoothing: antialiased;
-}
-
-/* ---- Draggable toolbar ---- */
-.bar {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  height: 32px;
-  padding: 0 8px 0 12px;
-  background: var(--bar-bg);
-  border-bottom: 1px solid var(--rule);
-  -webkit-user-select: none;
-  user-select: none;
-}
-
-.bar-title {
-  flex: 1;
-  min-width: 0;
-  font-size: 0.8em;
-  font-weight: 590;
-  letter-spacing: 0.01em;
-  color: var(--muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  cursor: default;
-}
-
-.bar-actions {
-  display: flex;
-  align-items: center;
-  gap: 1px;
-}
-
-.bar-actions button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 24px;
-  padding: 0;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  transition: background 0.1s ease, color 0.1s ease;
-}
-
-.bar-actions button:hover {
-  background: var(--hover);
-  color: var(--card-fg);
-}
-
-.bar-actions button.on {
-  color: var(--accent);
-}
-
-.bar-actions button:active {
-  transform: translateY(0.5px);
-}
-
-.bar-actions svg {
-  display: block;
-}
-
-/* ---- Body: holds editor / preview / palette, fills remaining height ---- */
-.body {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-}
-
-/* Single live-markdown editor surface — fills the body; the CodeMirror
-   instance carries its own padding, transparent background, and font. */
-.note {
-  width: 100%;
-  height: 100%;
-}
-
-.note .cm-editor {
-  height: 100%;
-}
-
-/* ---- ⌘K search palette ---- */
-.palette {
-  box-sizing: border-box;
-  width: 100%;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  color: var(--card-fg);
-  overflow: hidden;
-}
-
-.palette .search {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 12px 18px;
-  border: none;
-  border-bottom: 1px solid var(--rule);
-  outline: none;
-  background: transparent;
-  color: var(--card-fg);
-  font: inherit;
-  font-size: 1.05em;
-}
-
-.palette .search::placeholder {
-  color: var(--muted);
-}
-
-.palette .results {
-  flex: 1;
-  margin: 0;
-  padding: 6px;
-  list-style: none;
-  overflow-y: auto;
-}
-
-.palette .results li {
-  padding: 8px 12px;
-  border-radius: 8px;
-  cursor: pointer;
-}
-
-.palette .results li.sel {
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
-}
-
-.palette .results li .t {
-  font-weight: 550;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.palette .results li .p {
-  margin-top: 2px;
-  font-size: 0.85em;
-  color: var(--muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.palette .results li.empty {
-  color: var(--muted);
-  cursor: default;
-}
-
-.palette .hint {
-  padding: 8px 14px;
-  border-top: 1px solid var(--rule);
-  font-size: 0.75em;
-  color: var(--muted);
-  text-align: center;
+  padding: 9px;
 }

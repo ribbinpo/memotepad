@@ -17,6 +17,9 @@ const editorExtensions = [
   livePreview,
 ];
 
+const toolbarBtn =
+  "inline-flex h-6 w-[26px] cursor-pointer items-center justify-center rounded-md text-muted transition-colors hover:bg-hover hover:text-card-fg active:translate-y-[0.5px]";
+
 const editorSetup = {
   lineNumbers: false,
   foldGutter: false,
@@ -68,7 +71,8 @@ function App() {
 
   function flushSave(text: string) {
     clearPendingSave();
-    if (activeIdRef.current) invoke("write_note", { id: activeIdRef.current, content: text });
+    if (activeIdRef.current)
+      invoke("write_note", { id: activeIdRef.current, content: text });
   }
 
   async function refreshNotes(): Promise<NoteMeta[]> {
@@ -127,9 +131,11 @@ function App() {
 
   // Re-focus editor when the window regains focus (e.g. via ⌥. hotkey).
   useEffect(() => {
-    const unlisten = getCurrentWindow().onFocusChanged(({ payload: focused }) => {
-      if (focused && !palette) editorRef.current?.view?.focus();
-    });
+    const unlisten = getCurrentWindow().onFocusChanged(
+      ({ payload: focused }) => {
+        if (focused && !palette) editorRef.current?.view?.focus();
+      },
+    );
     return () => {
       unlisten.then((f) => f());
     };
@@ -147,7 +153,8 @@ function App() {
     localStorage.setItem("opacity", String(opacity));
   }, [opacity]);
 
-  const clampOpacity = (v: number) => Math.min(1, Math.max(0.4, Math.round(v * 100) / 100));
+  const clampOpacity = (v: number) =>
+    Math.min(1, Math.max(0.4, Math.round(v * 100) / 100));
 
   function snapSize(w: number, h: number) {
     getCurrentWindow().setSize(new LogicalSize(w, h));
@@ -254,77 +261,146 @@ function App() {
 
   // ---- render -----------------------------------------------------------
   return (
-    <div className="wrap" onKeyDown={handleKeyDown}>
-      <div className="card">
-        <header className="bar" data-tauri-drag-region>
-          <span className="bar-title" data-tauri-drag-region>
+    <div
+      className="h-full [opacity:var(--opacity,1)] transition-opacity duration-[120ms]"
+      onKeyDown={handleKeyDown}
+    >
+      <div className="flex h-full flex-col overflow-hidden rounded-[13px] bg-card text-card-fg antialiased backdrop-blur-[30px] backdrop-saturate-[1.8] shadow-[0_1px_2px_rgba(0,0,0,0.06),0_3px_6px_-2px_rgba(0,0,0,0.10),0_8px_16px_-6px_rgba(0,0,0,0.16),inset_0_0_0_0.5px_var(--ring),inset_0_1px_0_0_var(--hi)]">
+        <header
+          className="flex h-8 flex-none select-none items-center justify-between gap-2 border-b border-rule bg-bar pl-3 pr-2"
+          data-tauri-drag-region
+        >
+          <span
+            className="min-w-0 flex-1 cursor-default truncate text-[0.8em] font-[590] tracking-[0.01em] text-muted"
+            data-tauri-drag-region
+          >
             {palette ? "Notes" : activeTitle}
           </span>
-          <div className="bar-actions">
+          <div className="flex items-center gap-px">
             <button
               type="button"
               title="Search notes (⌘K)"
-              className={palette ? "on" : ""}
+              className={`${toolbarBtn}${palette ? " text-accent" : ""}`}
               onClick={() => (palette ? setPalette(false) : openPalette())}
             >
-              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-                <circle cx="7" cy="7" r="4.25" fill="none" stroke="currentColor" strokeWidth="1.5" />
-                <line x1="10.4" y1="10.4" x2="13.5" y2="13.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              <svg
+                viewBox="0 0 16 16"
+                width="15"
+                height="15"
+                aria-hidden="true"
+              >
+                <circle
+                  cx="7"
+                  cy="7"
+                  r="4.25"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                />
+                <line
+                  x1="10.4"
+                  y1="10.4"
+                  x2="13.5"
+                  y2="13.5"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
               </svg>
             </button>
-            <button type="button" title="New note (⌘N)" onClick={newNote}>
-              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-                <line x1="8" y1="2.5" x2="8" y2="13.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                <line x1="2.5" y1="8" x2="13.5" y2="8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            <button
+              type="button"
+              title="New note (⌘N)"
+              className={toolbarBtn}
+              onClick={newNote}
+            >
+              <svg
+                viewBox="0 0 16 16"
+                width="15"
+                height="15"
+                aria-hidden="true"
+              >
+                <line
+                  x1="8"
+                  y1="2.5"
+                  x2="8"
+                  y2="13.5"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
+                <line
+                  x1="2.5"
+                  y1="8"
+                  x2="13.5"
+                  y2="8"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
               </svg>
             </button>
           </div>
         </header>
-        <div className="body">
+        <div className="flex min-h-0 flex-1">
           {palette ? (
-        <div className="palette">
-          <input
-            ref={searchRef}
-            className="search"
-            value={query}
-            placeholder="Search notes…"
-            spellCheck={false}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setSelected(0);
-            }}
-          />
-          <ul className="results">
-            {filtered.length === 0 && <li className="empty">No notes match</li>}
-            {filtered.map((n, i) => (
-              <li
-                key={n.id}
-                className={i === selected ? "sel" : ""}
-                onMouseEnter={() => setSelected(i)}
-                onClick={() => openNote(n.id)}
-              >
-                <div className="t">{n.title}</div>
-                {n.preview && <div className="p">{n.preview}</div>}
-              </li>
-            ))}
-          </ul>
-          <div className="hint">↵ open · ⌘N new · ⌘⌫ delete · esc close</div>
-        </div>
-      ) : (
-        <CodeMirror
-          ref={editorRef}
-          className="note"
-          value={content}
-          onChange={handleChange}
-          extensions={editorExtensions}
-          basicSetup={editorSetup}
-          theme="none"
-          height="100%"
-          placeholder={
-            "Write anything here…\n\n⌘K notes · ⌘1–3 size · ⌘± opacity · Esc hide"
-          }
-          autoFocus
-        />
+            <div className="flex h-full w-full flex-col overflow-hidden text-card-fg">
+              <input
+                ref={searchRef}
+                className="border-b border-rule bg-transparent px-[18px] py-3 text-[1.05em] text-card-fg outline-none placeholder:text-muted"
+                value={query}
+                placeholder="Search notes…"
+                spellCheck={false}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  setSelected(0);
+                }}
+              />
+              <ul className="flex-1 list-none overflow-y-auto p-1.5">
+                {filtered.length === 0 && (
+                  <li className="cursor-default px-3 py-2 text-muted">
+                    No notes match
+                  </li>
+                )}
+                {filtered.map((n, i) => (
+                  <li
+                    key={n.id}
+                    className={`cursor-pointer rounded-lg px-3 py-2${
+                      i === selected
+                        ? " bg-[color-mix(in_srgb,var(--accent)_16%,transparent)]"
+                        : ""
+                    }`}
+                    onMouseEnter={() => setSelected(i)}
+                    onClick={() => openNote(n.id)}
+                  >
+                    <div className="truncate font-[550]">{n.title}</div>
+                    {n.preview && (
+                      <div className="mt-0.5 truncate text-[0.85em] text-muted">
+                        {n.preview}
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              <div className="border-t border-rule px-3.5 py-2 text-center text-[0.75em] text-muted">
+                ↵ open · ⌘N new · ⌘⌫ delete · esc close
+              </div>
+            </div>
+          ) : (
+            <CodeMirror
+              ref={editorRef}
+              className="h-full w-full"
+              value={content}
+              onChange={handleChange}
+              extensions={editorExtensions}
+              basicSetup={editorSetup}
+              theme="none"
+              height="100%"
+              placeholder={
+                "Write anything here…\n\n⌘K notes · ⌘1–3 size · ⌘± opacity · Esc hide"
+              }
+              autoFocus
+            />
           )}
         </div>
       </div>
