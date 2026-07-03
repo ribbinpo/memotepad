@@ -2,8 +2,33 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalSize } from "@tauri-apps/api/dpi";
-import { marked } from "marked";
+import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
+import { markdown } from "@codemirror/lang-markdown";
+import { EditorView } from "@codemirror/view";
+import { syntaxHighlighting } from "@codemirror/language";
+import { noteTheme, noteHighlight, livePreview } from "./editor";
 import "./App.css";
+
+const editorExtensions = [
+  markdown(),
+  EditorView.lineWrapping,
+  noteTheme,
+  syntaxHighlighting(noteHighlight),
+  livePreview,
+];
+
+const editorSetup = {
+  lineNumbers: false,
+  foldGutter: false,
+  highlightActiveLine: false,
+  highlightActiveLineGutter: false,
+  bracketMatching: false,
+  closeBrackets: false,
+  autocompletion: false,
+  searchKeymap: false,
+  indentOnInput: false,
+  highlightSelectionMatches: false,
+};
 
 type NoteMeta = {
   id: string;
@@ -17,7 +42,6 @@ function App() {
   const [notes, setNotes] = useState<NoteMeta[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [content, setContent] = useState("");
-  const [preview, setPreview] = useState(false);
   const [palette, setPalette] = useState(false);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(0);
@@ -26,8 +50,7 @@ function App() {
     return Number.isNaN(v) ? 1 : Math.min(1, Math.max(0.4, v));
   });
 
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const previewRef = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<ReactCodeMirrorRef>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const saveTimer = useRef<number | null>(null);
   const activeIdRef = useRef<string | null>(null);
@@ -62,7 +85,6 @@ function App() {
     activeIdRef.current = id;
     setContent(text);
     setPalette(false);
-    setPreview(false);
   }
 
   async function newNote() {
@@ -106,19 +128,18 @@ function App() {
   // Re-focus editor when the window regains focus (e.g. via ⌥. hotkey).
   useEffect(() => {
     const unlisten = getCurrentWindow().onFocusChanged(({ payload: focused }) => {
-      if (focused && !preview && !palette) textareaRef.current?.focus();
+      if (focused && !palette) editorRef.current?.view?.focus();
     });
     return () => {
       unlisten.then((f) => f());
     };
-  }, [preview, palette]);
+  }, [palette]);
 
   // Keep focus on whichever pane is showing so shortcuts always land.
   useEffect(() => {
     if (palette) searchRef.current?.focus();
-    else if (preview) previewRef.current?.focus();
-    else textareaRef.current?.focus();
-  }, [palette, preview]);
+    else editorRef.current?.view?.focus();
+  }, [palette]);
 
   // Apply + persist the note's translucency.
   useEffect(() => {
@@ -160,8 +181,7 @@ function App() {
   }
 
   // ---- editing ----------------------------------------------------------
-  function handleChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
-    const next = e.currentTarget.value;
+  function handleChange(next: string) {
     setContent(next);
     const id = activeIdRef.current;
     if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -226,15 +246,9 @@ function App() {
       return;
     }
 
-    if (mod && e.key.toLowerCase() === "e") {
-      e.preventDefault();
-      setPreview((p) => !p);
-      return;
-    }
     if (e.key === "Escape") {
       e.preventDefault();
-      if (preview) setPreview(false);
-      else await getCurrentWindow().hide();
+      await getCurrentWindow().hide();
     }
   }
 
@@ -256,17 +270,6 @@ function App() {
               <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
                 <circle cx="7" cy="7" r="4.25" fill="none" stroke="currentColor" strokeWidth="1.5" />
                 <line x1="10.4" y1="10.4" x2="13.5" y2="13.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              title="Preview (⌘E)"
-              className={preview ? "on" : ""}
-              onClick={() => setPreview((p) => !p)}
-            >
-              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-                <path d="M1 8s2.5-4.5 7-4.5S15 8 15 8s-2.5 4.5-7 4.5S1 8 1 8Z" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
-                <circle cx="8" cy="8" r="1.75" fill="currentColor" />
               </svg>
             </button>
             <button type="button" title="New note (⌘N)" onClick={newNote}>
@@ -307,25 +310,19 @@ function App() {
           </ul>
           <div className="hint">↵ open · ⌘N new · ⌘⌫ delete · esc close</div>
         </div>
-      ) : preview ? (
-        <div
-          ref={previewRef}
-          className="note preview"
-          tabIndex={0}
-          dangerouslySetInnerHTML={{
-            __html: marked.parse(content.trim() || "*Nothing here yet…*") as string,
-          }}
-        />
       ) : (
-        <textarea
-          ref={textareaRef}
+        <CodeMirror
+          ref={editorRef}
           className="note"
           value={content}
           onChange={handleChange}
+          extensions={editorExtensions}
+          basicSetup={editorSetup}
+          theme="none"
+          height="100%"
           placeholder={
-            "Write anything here…\n\n⌘K notes · ⌘E preview · ⌘1–3 size · ⌘± opacity · Esc hide"
+            "Write anything here…\n\n⌘K notes · ⌘1–3 size · ⌘± opacity · Esc hide"
           }
-          spellCheck={false}
           autoFocus
         />
           )}
