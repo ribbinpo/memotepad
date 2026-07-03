@@ -17,6 +17,8 @@
         "title": "",
         "width": 360,
         "height": 420,
+        "minWidth": 240,
+        "minHeight": 200,
         "decorations": false,
         "shadow": false,
         "alwaysOnTop": true,

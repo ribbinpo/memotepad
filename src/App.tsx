@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { LogicalSize } from "@tauri-apps/api/dpi";
+import { LogicalSize, LogicalPosition } from "@tauri-apps/api/dpi";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { markdown } from "@codemirror/lang-markdown";
 import { EditorView } from "@codemirror/view";
@@ -20,6 +20,105 @@ const editorExtensions = [
 
 const toolbarBtn =
   "inline-flex h-6 w-[26px] cursor-pointer items-center justify-center rounded-md text-muted transition-colors hover:bg-hover hover:text-card-fg active:translate-y-[0.5px]";
+
+type ResizeDir =
+  | "North" | "South" | "East" | "West"
+  | "NorthEast" | "NorthWest" | "SouthEast" | "SouthWest";
+
+// Keep in sync with tauri.conf.json minWidth/minHeight.
+const MIN_W = 240;
+const MIN_H = 200;
+
+type DragState = {
+  dir: ResizeDir;
+  sx: number; sy: number;              // pointer origin (screen, logical px)
+  x: number; y: number; w: number; h: number; // window origin (logical px)
+  lastX: number; lastY: number;
+  raf: number | null;
+};
+
+// The window is a borderless NSPanel, and tao's startResizeDragging is a no-op
+// on macOS — so we resize manually: track the pointer and drive setSize /
+// setPosition ourselves. The strips sit in the transparent inset margin,
+// behind the card, so they never cover the toolbar or editor.
+function ResizeHandles() {
+  const drag = useRef<DragState | null>(null);
+
+  const apply = () => {
+    const d = drag.current;
+    if (!d) return;
+    d.raf = null;
+    const dx = d.lastX - d.sx;
+    const dy = d.lastY - d.sy;
+    const right = d.x + d.w;
+    const bottom = d.y + d.h;
+    let x = d.x, y = d.y, w = d.w, h = d.h;
+    if (d.dir.includes("East")) w = Math.max(MIN_W, d.w + dx);
+    if (d.dir.includes("West")) { w = Math.max(MIN_W, d.w - dx); x = right - w; }
+    if (d.dir.includes("South")) h = Math.max(MIN_H, d.h + dy);
+    if (d.dir.includes("North")) { h = Math.max(MIN_H, d.h - dy); y = bottom - h; }
+    const win = getCurrentWindow();
+    if (d.dir.includes("West") || d.dir.includes("North"))
+      win.setPosition(new LogicalPosition(Math.round(x), Math.round(y)));
+    win.setSize(new LogicalSize(Math.round(w), Math.round(h)));
+  };
+
+  const onDown = (dir: ResizeDir) => async (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    const win = getCurrentWindow();
+    const [scale, pos, size] = await Promise.all([
+      win.scaleFactor(), win.outerPosition(), win.outerSize(),
+    ]);
+    drag.current = {
+      dir,
+      sx: e.screenX, sy: e.screenY,
+      x: pos.x / scale, y: pos.y / scale,
+      w: size.width / scale, h: size.height / scale,
+      lastX: e.screenX, lastY: e.screenY, raf: null,
+    };
+  };
+
+  const onMove = (e: React.PointerEvent) => {
+    const d = drag.current;
+    if (!d) return;
+    d.lastX = e.screenX;
+    d.lastY = e.screenY;
+    if (d.raf == null) d.raf = requestAnimationFrame(apply);
+  };
+
+  const onUp = (e: React.PointerEvent) => {
+    const d = drag.current;
+    if (d?.raf != null) cancelAnimationFrame(d.raf);
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {}
+    drag.current = null;
+  };
+
+  const strip = (dir: ResizeDir, cls: string) => (
+    <div
+      onPointerDown={onDown(dir)}
+      onPointerMove={onMove}
+      onPointerUp={onUp}
+      onPointerCancel={onUp}
+      className={`absolute z-0 ${cls}`}
+    />
+  );
+  return (
+    <>
+      {strip("North", "-top-[9px] left-0 right-0 h-[14px] cursor-ns-resize")}
+      {strip("South", "-bottom-[9px] left-0 right-0 h-[14px] cursor-ns-resize")}
+      {strip("West", "-left-[9px] top-0 bottom-0 w-[14px] cursor-ew-resize")}
+      {strip("East", "-right-[9px] top-0 bottom-0 w-[14px] cursor-ew-resize")}
+      {strip("NorthWest", "-top-[9px] -left-[9px] h-[18px] w-[18px] cursor-nwse-resize")}
+      {strip("NorthEast", "-top-[9px] -right-[9px] h-[18px] w-[18px] cursor-nesw-resize")}
+      {strip("SouthWest", "-bottom-[9px] -left-[9px] h-[18px] w-[18px] cursor-nesw-resize")}
+      {strip("SouthEast", "-bottom-[9px] -right-[9px] h-[18px] w-[18px] cursor-nwse-resize")}
+    </>
+  );
+}
 
 const editorSetup = {
   lineNumbers: false,
@@ -263,10 +362,11 @@ function App() {
   // ---- render -----------------------------------------------------------
   return (
     <div
-      className="h-full [opacity:var(--opacity,1)] transition-opacity duration-[120ms]"
+      className="relative h-full [opacity:var(--opacity,1)] transition-opacity duration-[120ms]"
       onKeyDown={handleKeyDown}
     >
-      <div className="flex h-full flex-col overflow-hidden rounded-[13px] bg-card text-card-fg antialiased backdrop-blur-[30px] backdrop-saturate-[1.8] shadow-[0_1px_2px_rgba(0,0,0,0.06),0_3px_6px_-2px_rgba(0,0,0,0.10),0_8px_16px_-6px_rgba(0,0,0,0.16),inset_0_0_0_0.5px_var(--ring),inset_0_1px_0_0_var(--hi)]">
+      <ResizeHandles />
+      <div className="relative z-10 flex h-full flex-col overflow-hidden rounded-[13px] bg-card text-card-fg antialiased backdrop-blur-[30px] backdrop-saturate-[1.8] shadow-[0_1px_2px_rgba(0,0,0,0.06),0_3px_6px_-2px_rgba(0,0,0,0.10),0_8px_16px_-6px_rgba(0,0,0,0.16),inset_0_0_0_0.5px_var(--ring),inset_0_1px_0_0_var(--hi)]">
         <header
           className="flex h-8 flex-none select-none items-center justify-between gap-2 border-b border-rule bg-bar pl-3 pr-2"
           data-tauri-drag-region
