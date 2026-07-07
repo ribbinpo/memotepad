@@ -129,7 +129,7 @@ Contributions, bug reports, and feature requests are welcome. Fork the repo, cre
 
 If memonotepad saves you a few keystrokes a day and you'd like to say thanks, you can support development here:
 
-[!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](buymeacoffee.com/ribbinpo)
+[!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://buymeacoffee.com/ribbinpo)
 
 > Replace the links above with your own donation pages. Every bit is appreciated — thank you!
 
