@@ -25,7 +25,6 @@ Memotepad is a Raycast/Spotlight-style floating note. It lives in your menu bar,
 | Build | For | |
 | --- | --- | --- |
 | **Apple Silicon** | M1 / M2 / M3 / M4 Macs | [Download .dmg](https://r2-dev.ribbinpo.dev/memotepad/releases/latest/memotepad-aarch64.dmg) |
-| **Apple Intel** | Intel Macs | [Download .dmg](https://r2-dev.ribbinpo.dev/memotepad/releases/latest/memotepad-x64.dmg) |
 
 > **First launch:** memotepad isn't code-signed yet, so macOS Gatekeeper will warn you. After dragging the app to **Applications**, right-click it → **Open** → **Open**. If macOS says the app is "damaged," open Terminal and run:
 > ```bash
