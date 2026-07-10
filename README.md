@@ -24,8 +24,8 @@ Momotepad is a Raycast/Spotlight-style floating note. It lives in your menu bar,
 
 | Build | For | |
 | --- | --- | --- |
-| **Apple Silicon** | M1 / M2 / M3 / M4 Macs | [Download .dmg](https://r2-dev.ribbinpo.dev/memotepad/momotepad-0.1.0-apple-silicon.dmg) |
-| **Universal** | Apple Silicon **and** Intel Macs | [Download .dmg](https://r2-dev.ribbinpo.dev/memotepad/momotepad_0.1.0_universal.dmg) |
+| **Apple Silicon** | M1 / M2 / M3 / M4 Macs | [Download .dmg](https://r2-dev.ribbinpo.dev/momotepad/momotepad-0.1.0-apple-silicon.dmg) |
+| **Universal** | Apple Silicon **and** Intel Macs | [Download .dmg](https://r2-dev.ribbinpo.dev/momotepad/momotepad_0.1.0_universal.dmg) |
 
 > **First launch:** momotepad isn't code-signed yet, so macOS Gatekeeper will warn you. After dragging the app to **Applications**, right-click it → **Open** → **Open**. If macOS says the app is "damaged," open Terminal and run:
 > ```bash
