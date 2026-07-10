@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Memonotepad is a macOS-only floating Markdown scratchpad (Raycast/Spotlight-style). A Tauri 2 + React 19 app: the Rust side owns the window as a non-activating `NSPanel`, the global hotkey, the menu-bar tray, and note file I/O; the React side is a single live-Markdown CodeMirror surface plus a `⌘K` command palette.
+Memonotepad is a macOS-only floating Markdown scratchpad (Raycast/Spotlight-style). A Tauri 2 + React 19 app: the Rust side owns the window as a non-activating `NSPanel`, the global hotkey, the menu-bar tray, and note file I/O; the React side is a single live-Markdown CodeMirror surface with two overlays — a `⌘K` Action Panel (all commands) and a `⌘P` notes-browse palette — plus a bottom Markdown-formatting toolbar.
 
 ## Commands
 
@@ -22,7 +22,7 @@ To iterate quickly: `npm run tauri dev`. Rust changes trigger a recompile; front
 
 ## Architecture
 
-**Two processes, bridged by Tauri commands.** The frontend never touches the filesystem directly — it calls `invoke("command_name", args)` and the Rust side ([src-tauri/src/lib.rs](src-tauri/src/lib.rs)) handles it. The five commands: `list_notes`, `read_note`, `write_note`, `create_note`, `delete_note`. When adding a command, register it in the `invoke_handler![]` macro at the bottom of `lib.rs`.
+**Two processes, bridged by Tauri commands.** The frontend never touches the filesystem directly — it calls `invoke("command_name", args)` and the Rust side ([src-tauri/src/lib.rs](src-tauri/src/lib.rs)) handles it. The commands: `list_notes`, `read_note`, `write_note`, `create_note`, `delete_note`, `export_note` (copies the note into `~/Downloads` and reveals it in Finder via `open -R`), `open_external` (opens a link from a rendered note, restricted to `http(s)`/`mailto`). When adding a command, register it in the `invoke_handler![]` macro at the bottom of `lib.rs`. Custom commands aren't gated by the capabilities allow-list — only `core:*`/plugin APIs are — so `export_note`/`open_external` needed no capability entry (both shell out to `open`, so their inputs are scheme-validated in Rust to keep untrusted note text from injecting flags/paths).
 
 **Notes are plain files, no database.** Each note is `{id}.md` under `~/Library/Application Support/com.poom.memonotepad/notes/`, where `id` is a nanosecond timestamp string. `list_notes` reads every file, derives a title (first non-empty line, heading marks stripped) and preview, and returns them sorted newest-first. Note ids must be ASCII-alphanumeric — `note_file()` enforces this, which also blocks path traversal. `migrate_legacy()` moves a pre-multi-note `note.md` into `notes/` on first `list_notes`.
 
@@ -33,14 +33,19 @@ To iterate quickly: `npm run tauri dev`. Rust changes trigger a recompile; front
 - `MIN_W`/`MIN_H` in `App.tsx` must match `minWidth`/`minHeight` in [src-tauri/tauri.conf.json](src-tauri/tauri.conf.json).
 - The app runs as an `Accessory` activation policy (no Dock icon). `toggle_window()` shows/hides via the panel; it only hides when already visible *and* focused, so the hotkey pulls a buried note forward first.
 
-**Live Markdown, no preview mode.** [src/editor.ts](src/editor.ts) holds three CodeMirror 6 extensions that style raw Markdown inline (the document always stays raw Markdown — it's the source of truth):
+**Live Markdown, no preview mode.** [src/editor.ts](src/editor.ts) styles/renders raw Markdown inline (the document always stays raw Markdown — it's the source of truth). Parsing uses GFM: `markdownExtension = markdown({ base: markdownLanguage })` — the `markdownLanguage` base (not the default commonmark) is what turns on tables, task lists, strikethrough, and autolinks, so `Table` nodes exist for the renderer. The extensions:
 - `noteHighlight` — a `HighlightStyle` sizing headings, bolding `**strong**`, etc.
-- `livePreview` — a `ViewPlugin` that *hides* syntax marks (`#`, `**`, ` ``` `) on inactive lines; marks reappear on the line the cursor touches, so editing stays raw.
+- `livePreview` — a `ViewPlugin` that *hides* syntax marks (`#`, `**`, ` ``` `) on inactive lines and *replaces* single-line constructs with rendered widgets: clickable links (`[t](url)` → an anchor that invokes `open_external`), dividers (`---`), task checkboxes (`- [ ]`/`- [x]`), and radios (`- ( )`/`- (x)`, non-standard, single-select within a contiguous run). Its `eventHandlers.mousedown` handles all widget clicks (toggle checkbox/radio text, open link, or drop the cursor into a table). Everything reveals its raw source the moment the cursor's line becomes active.
+- `tableView` — a **`StateField`**, deliberately *not* part of `livePreview`. GFM tables render as block widgets spanning multiple lines, and CodeMirror forbids a `ViewPlugin` from providing block/line-spanning decorations (they change vertical layout) — it throws at runtime if you try. So tables live in their own state field; every other (single-line) component stays in the plugin.
 - `codeBackground` — a `StateField` (keyed on selection, so fence lines expand when the cursor lands on them) that tints inline `` `code` `` and fenced blocks.
+
+Checkbox/radio/divider detection is done by **line regex** (`CHECK_RE`/`RADIO_RE`/`DIVIDER_RE`), not the parse tree, so it's independent of GFM tokenization quirks; links and tables come from the syntax tree. All widget click targets carry `data-*` attributes (`data-md-toggle`/`data-md-link`/`data-md-table` + `data-from`) that the single `mousedown` handler reads.
 
 **Auto-save is debounced in the frontend.** `handleChange` in `App.tsx` debounces a `write_note` invoke by 400ms. `flushSave`/`clearPendingSave` guard the edge cases: switching/deleting notes flushes or cancels the pending write so a stale save can't resurrect a deleted note or clobber the wrong file. `activeIdRef` mirrors `activeId` as a ref so async saves target the right note.
 
 **Frontend-owned UI state:** opacity (persisted to `localStorage`, applied via the `--opacity` CSS var, clamped 0.4–1.0), snap sizes (`⌘1/2/3`), and all keyboard shortcuts live in `handleKeyDown` in `App.tsx`. Window *geometry* (size/position, not visibility) is persisted by the `tauri-plugin-window-state` plugin on the Rust side.
+
+**One `overlay` state, one action list.** The editor/notes-palette/action-panel are a single `overlay: null | "notes" | "actions"` in `App.tsx` (they're mutually exclusive, so it's one state, not several booleans). The `actions` array is the single source of truth for "what can the app do": the Action Panel renders it *and* the `⌘K`-panel shortcut hints come from it, but the raw key shortcuts themselves are still dispatched in `handleKeyDown` — so a new command means adding both the `actions` row (for discoverability) and, if it has a shortcut, a `handleKeyDown` branch. The bottom formatting toolbar (`formatTools`) drives CodeMirror directly through `surround`/`prefixLines`/`insertLink`/`codeBlock`, which dispatch transactions against `editorRef.current.view`; its buttons `preventDefault` on mousedown so the editor keeps focus and selection.
 
 ## Constraints
 

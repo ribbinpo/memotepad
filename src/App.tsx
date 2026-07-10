@@ -3,23 +3,89 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalSize, LogicalPosition } from "@tauri-apps/api/dpi";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
-import { markdown } from "@codemirror/lang-markdown";
 import { EditorView } from "@codemirror/view";
 import { syntaxHighlighting } from "@codemirror/language";
-import { noteTheme, noteHighlight, livePreview, codeBackground } from "./editor";
+import {
+  markdownExtension,
+  noteTheme,
+  noteHighlight,
+  livePreview,
+  tableView,
+  codeBackground,
+} from "./editor";
 import "./App.css";
 
 const editorExtensions = [
-  markdown(),
+  markdownExtension,
   EditorView.lineWrapping,
   noteTheme,
   syntaxHighlighting(noteHighlight),
   livePreview,
+  tableView,
   codeBackground,
 ];
 
 const toolbarBtn =
   "inline-flex h-6 w-[26px] cursor-pointer items-center justify-center rounded-md text-muted transition-colors hover:bg-hover hover:text-card-fg active:translate-y-[0.5px]";
+
+// Markdown-toolbar button: sizes to its glyph (letters, `</>`, icons) rather
+// than a fixed square, and never grabs focus off the editor (mousedown default
+// is prevented at the call site) so the current selection stays put.
+const fmtBtn =
+  "inline-flex h-6 min-w-[26px] flex-none cursor-pointer items-center justify-center rounded-md px-1.5 text-[0.9em] leading-none text-muted transition-colors hover:bg-hover hover:text-card-fg active:translate-y-[0.5px]";
+
+// ---- module-scope icons (constant JSX) ------------------------------------
+const IconSearch = (
+  <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+    <circle cx="7" cy="7" r="4.25" fill="none" stroke="currentColor" strokeWidth="1.5" />
+    <line x1="10.4" y1="10.4" x2="13.5" y2="13.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+  </svg>
+);
+
+const IconPlus = (
+  <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+    <line x1="8" y1="2.5" x2="8" y2="13.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    <line x1="2.5" y1="8" x2="13.5" y2="8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+  </svg>
+);
+
+// Stacked lines = the "all actions" command menu.
+const IconActions = (
+  <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+    <line x1="3" y1="4.5" x2="13" y2="4.5" />
+    <line x1="3" y1="8" x2="13" y2="8" />
+    <line x1="3" y1="11.5" x2="13" y2="11.5" />
+  </svg>
+);
+
+const IconLink = (
+  <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
+    <path d="M6.6 9.4 9.4 6.6" />
+    <path d="M7.3 4.6 8.5 3.4a2.3 2.3 0 0 1 3.3 3.3L10.6 7.9" />
+    <path d="M8.7 11.4 7.5 12.6a2.3 2.3 0 0 1-3.3-3.3L5.4 8.1" />
+  </svg>
+);
+
+const IconList = (
+  <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
+    <line x1="6" y1="4.5" x2="13" y2="4.5" />
+    <line x1="6" y1="8" x2="13" y2="8" />
+    <line x1="6" y1="11.5" x2="13" y2="11.5" />
+    <circle cx="3" cy="4.5" r="0.9" fill="currentColor" stroke="none" />
+    <circle cx="3" cy="8" r="0.9" fill="currentColor" stroke="none" />
+    <circle cx="3" cy="11.5" r="0.9" fill="currentColor" stroke="none" />
+  </svg>
+);
+
+const IconTrash = (
+  <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 4.5h10" />
+    <path d="M6.5 4.5V3.2a0.7 0.7 0 0 1 0.7-0.7h1.6a0.7 0.7 0 0 1 0.7 0.7V4.5" />
+    <path d="M4.3 4.5l0.6 8a0.9 0.9 0 0 0 0.9 0.8h4.4a0.9 0.9 0 0 0 0.9-0.8l0.6-8" />
+    <line x1="6.6" y1="6.8" x2="6.8" y2="11" />
+    <line x1="9.4" y1="6.8" x2="9.2" y2="11" />
+  </svg>
+);
 
 type ResizeDir =
   | "North" | "South" | "East" | "West"
@@ -141,13 +207,25 @@ type NoteMeta = {
   modified: number;
 };
 
+// null = the editor; "notes" = browse palette; "actions" = command panel.
+type Overlay = null | "notes" | "actions";
+
+type ActionItem = {
+  id: string;
+  label: string;
+  hint: string;
+  run: () => void;
+};
+
 function App() {
   const [notes, setNotes] = useState<NoteMeta[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [content, setContent] = useState("");
-  const [palette, setPalette] = useState(false);
+  const [overlay, setOverlay] = useState<Overlay>(null);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(0);
+  // Note id awaiting a second click to confirm deletion (guards accidental taps).
+  const [confirmId, setConfirmId] = useState<string | null>(null);
   const [opacity, setOpacity] = useState<number>(() => {
     const v = parseFloat(localStorage.getItem("opacity") ?? "1");
     return Number.isNaN(v) ? 1 : Math.min(1, Math.max(0.4, v));
@@ -188,7 +266,7 @@ function App() {
     setActiveId(id);
     activeIdRef.current = id;
     setContent(text);
-    setPalette(false);
+    setOverlay(null);
   }
 
   async function newNote() {
@@ -199,6 +277,7 @@ function App() {
   }
 
   async function deleteNote(id: string) {
+    setConfirmId(null);
     const wasActive = id === activeIdRef.current;
     if (wasActive) clearPendingSave(); // don't let a pending save resurrect it
     await invoke("delete_note", { id });
@@ -213,6 +292,20 @@ function App() {
       }
     }
     setSelected(0);
+  }
+
+  // Flush the latest text to disk, then hand the note off to Rust to copy into
+  // Downloads and reveal it in Finder.
+  async function exportNote() {
+    const id = activeIdRef.current;
+    if (!id) return;
+    clearPendingSave();
+    try {
+      await invoke("write_note", { id, content });
+      await invoke("export_note", { id });
+    } catch {
+      /* export is best-effort; a failure just leaves the note where it is */
+    }
   }
 
   // ---- init -------------------------------------------------------------
@@ -233,19 +326,19 @@ function App() {
   useEffect(() => {
     const unlisten = getCurrentWindow().onFocusChanged(
       ({ payload: focused }) => {
-        if (focused && !palette) editorRef.current?.view?.focus();
+        if (focused && !overlay) editorRef.current?.view?.focus();
       },
     );
     return () => {
       unlisten.then((f) => f());
     };
-  }, [palette]);
+  }, [overlay]);
 
   // Keep focus on whichever pane is showing so shortcuts always land.
   useEffect(() => {
-    if (palette) searchRef.current?.focus();
+    if (overlay) searchRef.current?.focus();
     else editorRef.current?.view?.focus();
-  }, [palette]);
+  }, [overlay]);
 
   // Apply + persist the note's translucency.
   useEffect(() => {
@@ -271,6 +364,128 @@ function App() {
     return t || "Untitled note";
   }, [content]);
 
+  // ---- overlays ---------------------------------------------------------
+  function openNotes() {
+    refreshNotes();
+    setQuery("");
+    setSelected(0);
+    setConfirmId(null);
+    setOverlay("notes");
+  }
+
+  function openActions() {
+    setQuery("");
+    setSelected(0);
+    setOverlay("actions");
+  }
+
+  function closeOverlay() {
+    setOverlay(null);
+  }
+
+  // Every command the app can run, surfaced (searchable) in the ⌘K action panel
+  // and driven directly by the shortcuts in handleKeyDown. One source of truth
+  // for "what can I do here" — add a row and it shows up in the panel.
+  const actions: ActionItem[] = [
+    { id: "new", label: "New Note", hint: "⌘N", run: () => newNote() },
+    { id: "browse", label: "Browse Notes", hint: "⌘P", run: () => openNotes() },
+    { id: "export", label: "Export Note to Downloads", hint: "⌘E", run: () => { closeOverlay(); exportNote(); } },
+    { id: "size1", label: "Compact Size", hint: "⌘1", run: () => { closeOverlay(); snapSize(300, 360); } },
+    { id: "size2", label: "Default Size", hint: "⌘2", run: () => { closeOverlay(); snapSize(360, 440); } },
+    { id: "size3", label: "Large Size", hint: "⌘3", run: () => { closeOverlay(); snapSize(480, 600); } },
+    { id: "opac-up", label: "Increase Opacity", hint: "⌘+", run: () => setOpacity((o) => clampOpacity(o + 0.1)) },
+    { id: "opac-down", label: "Decrease Opacity", hint: "⌘−", run: () => setOpacity((o) => clampOpacity(o - 0.1)) },
+    { id: "hide", label: "Hide Window", hint: "esc", run: () => { getCurrentWindow().hide(); } },
+  ];
+
+  const visibleActions = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return actions;
+    return actions.filter((a) => a.label.toLowerCase().includes(q));
+    // `actions` is rebuilt each render; `query` is the real filter input.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, content, notes, opacity]);
+
+  // ---- markdown formatting (bottom toolbar) -----------------------------
+  // Wrap the selection with `before`/`after` (e.g. ** … **) and leave the inner
+  // text selected so the user can keep typing over it.
+  function surround(before: string, after = before) {
+    const view = editorRef.current?.view;
+    if (!view) return;
+    const { state } = view;
+    const r = state.selection.main;
+    const inner = state.sliceDoc(r.from, r.to);
+    view.dispatch({
+      changes: { from: r.from, to: r.to, insert: before + inner + after },
+      selection: { anchor: r.from + before.length, head: r.from + before.length + inner.length },
+      scrollIntoView: true,
+    });
+    view.focus();
+  }
+
+  // Add a line prefix (`# `, `- `, `> `, `- [ ] `) to every line the selection
+  // touches — the building block for headings, lists and quotes.
+  function prefixLines(prefix: string) {
+    const view = editorRef.current?.view;
+    if (!view) return;
+    const { state } = view;
+    const r = state.selection.main;
+    const first = state.doc.lineAt(r.from).number;
+    const last = state.doc.lineAt(r.to).number;
+    const changes = [];
+    for (let n = first; n <= last; n++)
+      changes.push({ from: state.doc.line(n).from, insert: prefix });
+    const added = prefix.length;
+    view.dispatch({
+      changes,
+      selection: { anchor: r.from + added, head: r.to + added * (last - first + 1) },
+      scrollIntoView: true,
+    });
+    view.focus();
+  }
+
+  function insertLink() {
+    const view = editorRef.current?.view;
+    if (!view) return;
+    const { state } = view;
+    const r = state.selection.main;
+    const text = state.sliceDoc(r.from, r.to) || "text";
+    const urlAt = r.from + text.length + 3; // "[" + text + "]("
+    view.dispatch({
+      changes: { from: r.from, to: r.to, insert: `[${text}](url)` },
+      selection: { anchor: urlAt, head: urlAt + 3 }, // select "url"
+      scrollIntoView: true,
+    });
+    view.focus();
+  }
+
+  function codeBlock() {
+    const view = editorRef.current?.view;
+    if (!view) return;
+    const { state } = view;
+    const r = state.selection.main;
+    const inner = state.sliceDoc(r.from, r.to);
+    view.dispatch({
+      changes: { from: r.from, to: r.to, insert: "```\n" + inner + "\n```" },
+      selection: { anchor: r.from + 4, head: r.from + 4 + inner.length }, // after "```\n"
+      scrollIntoView: true,
+    });
+    view.focus();
+  }
+
+  const formatTools = [
+    { key: "h", title: "Heading", node: <span className="font-bold">H</span>, run: () => prefixLines("# ") },
+    { key: "b", title: "Bold", node: <span className="font-bold">B</span>, run: () => surround("**") },
+    { key: "i", title: "Italic", node: <span className="italic" style={{ fontFamily: "Georgia, serif" }}>I</span>, run: () => surround("*") },
+    { key: "s", title: "Strikethrough", node: <span className="line-through">S</span>, run: () => surround("~~") },
+    { key: "code", title: "Inline code", node: <span className="font-mono text-[0.8em]">{"</>"}</span>, run: () => surround("`") },
+    { key: "link", title: "Link", node: IconLink, run: () => insertLink() },
+    { key: "ul", title: "Bullet list", node: IconList, run: () => prefixLines("- ") },
+    { key: "task", title: "Checklist", node: <span className="text-[0.95em]">☑</span>, run: () => prefixLines("- [ ] ") },
+    { key: "quote", title: "Quote", node: <span style={{ fontFamily: "Georgia, serif" }} className="text-[1.1em] leading-none">”</span>, run: () => prefixLines("> ") },
+    { key: "codeblock", title: "Code block", node: <span className="font-mono text-[0.8em]">{"{ }"}</span>, run: () => codeBlock() },
+  ];
+
   // ---- search -----------------------------------------------------------
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -279,13 +494,6 @@ function App() {
       (n) => n.title.toLowerCase().includes(q) || n.body.includes(q),
     );
   }, [notes, query]);
-
-  function openPalette() {
-    refreshNotes();
-    setQuery("");
-    setSelected(0);
-    setPalette(true);
-  }
 
   // ---- editing ----------------------------------------------------------
   function handleChange(next: string) {
@@ -299,6 +507,7 @@ function App() {
 
   async function handleKeyDown(e: React.KeyboardEvent) {
     const mod = e.metaKey || e.ctrlKey;
+    const key = e.key.toLowerCase();
 
     // Opacity: ⌘+ / ⌘- (work in any view).
     if (mod && (e.key === "=" || e.key === "+")) {
@@ -320,18 +529,29 @@ function App() {
       return;
     }
 
-    if (mod && e.key.toLowerCase() === "k") {
+    // Global command shortcuts.
+    if (mod && key === "k") {
       e.preventDefault();
-      palette ? setPalette(false) : openPalette();
+      overlay === "actions" ? closeOverlay() : openActions();
       return;
     }
-    if (mod && e.key.toLowerCase() === "n") {
+    if (mod && key === "p") {
+      e.preventDefault();
+      overlay === "notes" ? closeOverlay() : openNotes();
+      return;
+    }
+    if (mod && key === "n") {
       e.preventDefault();
       newNote();
       return;
     }
+    if (mod && key === "e") {
+      e.preventDefault();
+      exportNote();
+      return;
+    }
 
-    if (palette) {
+    if (overlay === "notes") {
       if (e.key === "ArrowDown") {
         e.preventDefault();
         setSelected((s) => Math.min(s + 1, filtered.length - 1));
@@ -348,7 +568,24 @@ function App() {
         if (n) deleteNote(n.id);
       } else if (e.key === "Escape") {
         e.preventDefault();
-        setPalette(false);
+        closeOverlay();
+      }
+      return;
+    }
+
+    if (overlay === "actions") {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSelected((s) => Math.min(s + 1, visibleActions.length - 1));
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSelected((s) => Math.max(s - 1, 0));
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        visibleActions[selected]?.run();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        closeOverlay();
       }
       return;
     }
@@ -360,6 +597,9 @@ function App() {
   }
 
   // ---- render -----------------------------------------------------------
+  const headerTitle =
+    overlay === "notes" ? "Notes" : overlay === "actions" ? "Actions" : activeTitle;
+
   return (
     <div
       className="relative h-full [opacity:var(--opacity,1)] transition-opacity duration-[120ms]"
@@ -368,46 +608,52 @@ function App() {
       <ResizeHandles />
       <div className="relative z-10 flex h-full flex-col overflow-hidden rounded-[13px] bg-card text-card-fg antialiased backdrop-blur-[30px] backdrop-saturate-[1.8] shadow-[0_1px_2px_rgba(0,0,0,0.06),0_3px_6px_-2px_rgba(0,0,0,0.10),0_8px_16px_-6px_rgba(0,0,0,0.16),inset_0_0_0_0.5px_var(--ring),inset_0_1px_0_0_var(--hi)]">
         <header
-          className="flex h-8 flex-none select-none items-center justify-between gap-2 border-b border-rule bg-bar pl-3 pr-2"
+          className="grid h-8 flex-none select-none grid-cols-[auto_1fr_auto] items-center gap-2 border-b border-rule bg-bar px-2"
           data-tauri-drag-region
         >
-          <span
-            className="min-w-0 flex-1 cursor-default truncate text-[0.8em] font-[590] tracking-[0.01em] text-muted"
-            data-tauri-drag-region
-          >
-            {palette ? "Notes" : activeTitle}
-          </span>
-          <div className="flex items-center gap-px">
+          {/* left — macOS-style close button (hides the panel) */}
+          <div className="flex items-center pl-1">
             <button
               type="button"
-              title="Search notes (⌘K)"
-              className={`${toolbarBtn}${palette ? " text-accent" : ""}`}
-              onClick={() => (palette ? setPalette(false) : openPalette())}
+              title="Hide window (esc)"
+              aria-label="Hide window"
+              onClick={() => getCurrentWindow().hide()}
+              className="group flex h-[13px] w-[13px] items-center justify-center rounded-full bg-[#ff5f57] shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.2)] transition-[filter] hover:brightness-95 active:brightness-90"
             >
               <svg
-                viewBox="0 0 16 16"
-                width="15"
-                height="15"
+                viewBox="0 0 10 10"
+                width="7"
+                height="7"
                 aria-hidden="true"
+                className="opacity-0 transition-opacity group-hover:opacity-100"
               >
-                <circle
-                  cx="7"
-                  cy="7"
-                  r="4.25"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                />
-                <line
-                  x1="10.4"
-                  y1="10.4"
-                  x2="13.5"
-                  y2="13.5"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
+                <path
+                  d="M2.6 2.6 7.4 7.4 M7.4 2.6 2.6 7.4"
+                  stroke="rgba(0,0,0,0.55)"
+                  strokeWidth="1.3"
                   strokeLinecap="round"
                 />
               </svg>
+            </button>
+          </div>
+
+          {/* center — active note / overlay name */}
+          <span
+            className="min-w-0 cursor-default truncate text-center text-[0.8em] font-[590] tracking-[0.01em] text-muted"
+            data-tauri-drag-region
+          >
+            {headerTitle}
+          </span>
+
+          {/* right — quick actions */}
+          <div className="flex items-center gap-px">
+            <button
+              type="button"
+              title="Browse notes (⌘P)"
+              className={`${toolbarBtn}${overlay === "notes" ? " text-accent" : ""}`}
+              onClick={() => (overlay === "notes" ? closeOverlay() : openNotes())}
+            >
+              {IconSearch}
             </button>
             <button
               type="button"
@@ -415,36 +661,21 @@ function App() {
               className={toolbarBtn}
               onClick={newNote}
             >
-              <svg
-                viewBox="0 0 16 16"
-                width="15"
-                height="15"
-                aria-hidden="true"
-              >
-                <line
-                  x1="8"
-                  y1="2.5"
-                  x2="8"
-                  y2="13.5"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                />
-                <line
-                  x1="2.5"
-                  y1="8"
-                  x2="13.5"
-                  y2="8"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                />
-              </svg>
+              {IconPlus}
+            </button>
+            <button
+              type="button"
+              title="Actions (⌘K)"
+              className={`${toolbarBtn}${overlay === "actions" ? " text-accent" : ""}`}
+              onClick={() => (overlay === "actions" ? closeOverlay() : openActions())}
+            >
+              {IconActions}
             </button>
           </div>
         </header>
+
         <div className="flex min-h-0 flex-1">
-          {palette ? (
+          {overlay === "notes" ? (
             <div className="flex h-full w-full flex-col overflow-hidden text-card-fg">
               <input
                 ref={searchRef}
@@ -455,6 +686,7 @@ function App() {
                 onChange={(e) => {
                   setQuery(e.target.value);
                   setSelected(0);
+                  setConfirmId(null);
                 }}
               />
               <ul className="flex-1 list-none overflow-y-auto p-1.5">
@@ -466,25 +698,110 @@ function App() {
                 {filtered.map((n, i) => (
                   <li
                     key={n.id}
-                    className={`cursor-pointer rounded-lg px-3 py-2${
+                    className={`group flex items-center gap-2 rounded-lg px-3 py-2${
                       i === selected
                         ? " bg-[color-mix(in_srgb,var(--accent)_16%,transparent)]"
                         : ""
                     }`}
                     onMouseEnter={() => setSelected(i)}
-                    onClick={() => openNote(n.id)}
                   >
-                    <div className="truncate font-[550]">{n.title}</div>
-                    {n.preview && (
-                      <div className="mt-0.5 truncate text-[0.85em] text-muted">
-                        {n.preview}
+                    <div
+                      className="min-w-0 flex-1 cursor-pointer"
+                      onClick={() => openNote(n.id)}
+                    >
+                      <div className="truncate font-[550]">{n.title}</div>
+                      {n.preview && (
+                        <div className="mt-0.5 truncate text-[0.85em] text-muted">
+                          {n.preview}
+                        </div>
+                      )}
+                    </div>
+                    {confirmId === n.id ? (
+                      <div className="flex flex-none items-center gap-1">
+                        <button
+                          type="button"
+                          className="cursor-pointer rounded-md bg-[#ff5f57] px-2 py-1 text-[0.75em] font-[550] text-white transition-[filter] hover:brightness-95 active:translate-y-[0.5px]"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteNote(n.id);
+                          }}
+                        >
+                          Delete
+                        </button>
+                        <button
+                          type="button"
+                          className="cursor-pointer rounded-md px-2 py-1 text-[0.75em] font-[550] text-muted transition-colors hover:bg-hover hover:text-card-fg active:translate-y-[0.5px]"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setConfirmId(null);
+                          }}
+                        >
+                          Cancel
+                        </button>
                       </div>
+                    ) : (
+                      <button
+                        type="button"
+                        title="Delete note"
+                        aria-label="Delete note"
+                        className={`flex-none cursor-pointer rounded-md p-1 text-muted transition-colors hover:bg-hover hover:text-[#ff5f57] active:translate-y-[0.5px] group-hover:opacity-100${
+                          i === selected ? " opacity-100" : " opacity-0"
+                        }`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelected(i);
+                          setConfirmId(n.id);
+                        }}
+                      >
+                        {IconTrash}
+                      </button>
                     )}
                   </li>
                 ))}
               </ul>
               <div className="border-t border-rule px-3.5 py-2 text-center text-[0.75em] text-muted">
                 ↵ open · ⌘N new · ⌘⌫ delete · esc close
+              </div>
+            </div>
+          ) : overlay === "actions" ? (
+            <div className="flex h-full w-full flex-col overflow-hidden text-card-fg">
+              <input
+                ref={searchRef}
+                className="border-b border-rule bg-transparent px-[18px] py-3 text-[1.05em] text-card-fg outline-none placeholder:text-muted"
+                value={query}
+                placeholder="Search actions…"
+                spellCheck={false}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  setSelected(0);
+                }}
+              />
+              <ul className="flex-1 list-none overflow-y-auto p-1.5">
+                {visibleActions.length === 0 && (
+                  <li className="cursor-default px-3 py-2 text-muted">
+                    No actions match
+                  </li>
+                )}
+                {visibleActions.map((a, i) => (
+                  <li
+                    key={a.id}
+                    className={`flex cursor-pointer items-center justify-between gap-3 rounded-lg px-3 py-2${
+                      i === selected
+                        ? " bg-[color-mix(in_srgb,var(--accent)_16%,transparent)]"
+                        : ""
+                    }`}
+                    onMouseEnter={() => setSelected(i)}
+                    onClick={() => a.run()}
+                  >
+                    <span className="truncate font-[550]">{a.label}</span>
+                    <kbd className="flex-none font-sans text-[0.75em] text-muted">
+                      {a.hint}
+                    </kbd>
+                  </li>
+                ))}
+              </ul>
+              <div className="border-t border-rule px-3.5 py-2 text-center text-[0.75em] text-muted">
+                ↵ run · esc close
               </div>
             </div>
           ) : (
@@ -498,12 +815,42 @@ function App() {
               theme="none"
               height="100%"
               placeholder={
-                "Write anything here…\n\n⌘K notes · ⌘1–3 size · ⌘± opacity · Esc hide"
+                "Write anything here…\n\n⌘K actions · ⌘P notes · ⌘N new · esc hide"
               }
               autoFocus
             />
           )}
         </div>
+
+        {/* bottom — markdown formatting toolbar (editor view only) */}
+        {overlay === null && (
+          <footer className="flex h-9 flex-none items-center justify-between gap-2 border-t border-rule bg-bar pl-1.5 pr-2">
+            <div className="flex min-w-0 items-center gap-0.5 overflow-x-auto">
+              {formatTools.map((f) => (
+                <button
+                  key={f.key}
+                  type="button"
+                  title={f.title}
+                  className={fmtBtn}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={f.run}
+                >
+                  {f.node}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              title="Actions (⌘K)"
+              className="flex flex-none cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-[0.75em] text-muted transition-colors hover:bg-hover hover:text-card-fg active:translate-y-[0.5px]"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={openActions}
+            >
+              Actions
+              <kbd className="font-sans text-[0.95em]">⌘K</kbd>
+            </button>
+          </footer>
+        )}
       </div>
     </div>
   );

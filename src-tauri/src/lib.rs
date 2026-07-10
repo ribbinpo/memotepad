@@ -77,6 +77,52 @@ fn derive(content: &str) -> (String, String) {
     (title, preview)
 }
 
+/// Strip characters that can't appear in a filename, so an exported note keeps a
+/// readable name derived from its title without breaking on `/`, `:`, etc.
+fn sanitize_filename(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| match c {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '-',
+            c if c.is_control() => ' ',
+            c => c,
+        })
+        .collect();
+    let trimmed = cleaned.trim().trim_matches('.').trim();
+    if trimmed.is_empty() {
+        "note".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// Append ` (1)`, ` (2)`, … until the path is free, so exporting twice never
+/// silently overwrites a previous export.
+fn unique_path(path: PathBuf) -> PathBuf {
+    if !path.exists() {
+        return path;
+    }
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("note")
+        .to_string();
+    let ext = path.extension().and_then(|s| s.to_str()).map(str::to_string);
+    let parent = path.parent().map(Path::to_path_buf).unwrap_or_default();
+    let mut i = 1;
+    loop {
+        let name = match &ext {
+            Some(e) => format!("{stem} ({i}).{e}"),
+            None => format!("{stem} ({i})"),
+        };
+        let candidate = parent.join(name);
+        if !candidate.exists() {
+            return candidate;
+        }
+        i += 1;
+    }
+}
+
 /// One-time move of the old single `note.md` into `notes/` so upgrades keep data.
 fn migrate_legacy(app: &AppHandle) -> Result<(), String> {
     let legacy = app_dir(app)?.join(LEGACY_FILE);
@@ -152,6 +198,50 @@ fn create_note(app: AppHandle) -> Result<String, String> {
 fn delete_note(app: AppHandle, id: String) -> Result<(), String> {
     let path = note_file(&app, &id)?;
     let _ = fs::remove_file(path);
+    Ok(())
+}
+
+/// Write a copy of the note into the user's Downloads folder as `{title}.md` and
+/// reveal it in Finder. Returns the exported path. The frontend flushes the
+/// pending save before calling this, so the on-disk note is current.
+#[tauri::command]
+fn export_note(app: AppHandle, id: String) -> Result<String, String> {
+    let src = note_file(&app, &id)?;
+    let content = fs::read_to_string(&src).map_err(|e| e.to_string())?;
+    let (title, _) = derive(&content);
+
+    let downloads = app.path().download_dir().map_err(|e| e.to_string())?;
+    fs::create_dir_all(&downloads).map_err(|e| e.to_string())?;
+    let dest = unique_path(downloads.join(format!("{}.md", sanitize_filename(&title))));
+    fs::write(&dest, &content).map_err(|e| e.to_string())?;
+
+    #[cfg(target_os = "macos")]
+    {
+        // Reveal (not open) so the user sees where it landed without launching an editor.
+        let _ = std::process::Command::new("open").arg("-R").arg(&dest).spawn();
+    }
+
+    Ok(dest.to_string_lossy().into_owned())
+}
+
+/// Open a web/mail link from a rendered note in the default browser/mail app.
+/// Restricted to http(s)/mailto so a note can't smuggle a local path or a flag
+/// (the scheme check guarantees the argument can't start with `-`) into `open`.
+#[tauri::command]
+fn open_external(url: String) -> Result<(), String> {
+    let allowed = url.starts_with("http://")
+        || url.starts_with("https://")
+        || url.starts_with("mailto:");
+    if !allowed {
+        return Err("unsupported url scheme".into());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
@@ -337,7 +427,9 @@ pub fn run() {
             read_note,
             write_note,
             create_note,
-            delete_note
+            delete_note,
+            export_note,
+            open_external
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
