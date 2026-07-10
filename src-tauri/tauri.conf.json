@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "memonotepad",
+  "productName": "momotepad",
   "version": "0.2.0",
-  "identifier": "com.poom.memonotepad",
+  "identifier": "com.poom.momotepad",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
