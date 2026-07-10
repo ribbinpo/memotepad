@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="src-tauri/app-icon.png" alt="momotepad app icon" width="140" height="140">
+  <img src="src-tauri/app-icon.png" alt="memotepad app icon" width="140" height="140">
 </p>
 
-<h1 align="center">Momotepad</h1>
+<h1 align="center">Memotepad</h1>
 
 <p align="center">
   A tiny, always-on-top Markdown scratchpad for macOS — summon it with a<br>
@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/React-19-149ECA?logo=react&logoColor=white" alt="React 19">
 </p>
 
-Momotepad is a Raycast/Spotlight-style floating note. It lives in your menu bar, appears on top of any app — even fullscreen ones — when you hit the global shortcut, and disappears just as fast. Everything you type is plain Markdown, saved instantly to local `.md` files. There's no "edit mode" and no "preview mode": Markdown styles itself live as you type, the way Notion and Raycast Notes work.
+Memotepad is a Raycast/Spotlight-style floating note. It lives in your menu bar, appears on top of any app — even fullscreen ones — when you hit the global shortcut, and disappears just as fast. Everything you type is plain Markdown, saved instantly to local `.md` files. There's no "edit mode" and no "preview mode": Markdown styles itself live as you type, the way Notion and Raycast Notes work.
 
 ---
 
@@ -24,12 +24,12 @@ Momotepad is a Raycast/Spotlight-style floating note. It lives in your menu bar,
 
 | Build | For | |
 | --- | --- | --- |
-| **Apple Silicon** | M1 / M2 / M3 / M4 Macs | [Download .dmg](https://r2-dev.ribbinpo.dev/memotepad/momotepad-0.1.0-apple-silicon.dmg) |
-| **Universal** | Apple Silicon **and** Intel Macs | [Download .dmg](https://r2-dev.ribbinpo.dev/memotepad/momotepad_0.1.0_universal.dmg) |
+| **Apple Silicon** | M1 / M2 / M3 / M4 Macs | [Download .dmg](https://r2-dev.ribbinpo.dev/memotepad/memotepad-0.1.0-apple-silicon.dmg) |
+| **Universal** | Apple Silicon **and** Intel Macs | [Download .dmg](https://r2-dev.ribbinpo.dev/memotepad/memotepad_0.1.0_universal.dmg) |
 
-> **First launch:** momotepad isn't code-signed yet, so macOS Gatekeeper will warn you. After dragging the app to **Applications**, right-click it → **Open** → **Open**. If macOS says the app is "damaged," open Terminal and run:
+> **First launch:** memotepad isn't code-signed yet, so macOS Gatekeeper will warn you. After dragging the app to **Applications**, right-click it → **Open** → **Open**. If macOS says the app is "damaged," open Terminal and run:
 > ```bash
-> xattr -dr com.apple.quarantine /Applications/momotepad.app
+> xattr -dr com.apple.quarantine /Applications/memotepad.app
 > ```
 
 ---
@@ -91,7 +91,7 @@ The bundled app is produced under `src-tauri/target/release/bundle/`.
 Notes are stored as individual Markdown files under the app's data directory:
 
 ```
-~/Library/Application Support/com.poom.momotepad/notes/*.md
+~/Library/Application Support/com.poom.memotepad/notes/*.md
 ```
 
 Because they're plain `.md` files, you can back them up, sync them, or edit them in any other editor.
@@ -133,7 +133,7 @@ Contributions, bug reports, and feature requests are welcome. Fork the repo, cre
 
 ## ❤️ Support / Donation
 
-If momotepad saves you a few keystrokes a day and you'd like to say thanks, you can support development here:
+If memotepad saves you a few keystrokes a day and you'd like to say thanks, you can support development here:
 
 [!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://buymeacoffee.com/ribbinpo)
 

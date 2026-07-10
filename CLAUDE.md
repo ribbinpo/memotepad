@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Momotepad is a macOS-only floating Markdown scratchpad (Raycast/Spotlight-style). A Tauri 2 + React 19 app: the Rust side owns the window as a non-activating `NSPanel`, the global hotkey, the menu-bar tray, and note file I/O; the React side is a single live-Markdown CodeMirror surface with two overlays — a `⌘K` Action Panel (all commands) and a `⌘P` notes-browse palette — plus a bottom Markdown-formatting toolbar.
+Memotepad is a macOS-only floating Markdown scratchpad (Raycast/Spotlight-style). A Tauri 2 + React 19 app: the Rust side owns the window as a non-activating `NSPanel`, the global hotkey, the menu-bar tray, and note file I/O; the React side is a single live-Markdown CodeMirror surface with two overlays — a `⌘K` Action Panel (all commands) and a `⌘P` notes-browse palette — plus a bottom Markdown-formatting toolbar.
 
 ## Commands
 
@@ -24,7 +24,7 @@ To iterate quickly: `npm run tauri dev`. Rust changes trigger a recompile; front
 
 **Two processes, bridged by Tauri commands.** The frontend never touches the filesystem directly — it calls `invoke("command_name", args)` and the Rust side ([src-tauri/src/lib.rs](src-tauri/src/lib.rs)) handles it. The commands: `list_notes`, `read_note`, `write_note`, `create_note`, `delete_note`, `export_note` (copies the note into `~/Downloads` and reveals it in Finder via `open -R`), `open_external` (opens a link from a rendered note, restricted to `http(s)`/`mailto`). When adding a command, register it in the `invoke_handler![]` macro at the bottom of `lib.rs`. Custom commands aren't gated by the capabilities allow-list — only `core:*`/plugin APIs are — so `export_note`/`open_external` needed no capability entry (both shell out to `open`, so their inputs are scheme-validated in Rust to keep untrusted note text from injecting flags/paths).
 
-**Notes are plain files, no database.** Each note is `{id}.md` under `~/Library/Application Support/com.poom.momotepad/notes/`, where `id` is a nanosecond timestamp string. `list_notes` reads every file, derives a title (first non-empty line, heading marks stripped) and preview, and returns them sorted newest-first. Note ids must be ASCII-alphanumeric — `note_file()` enforces this, which also blocks path traversal. `migrate_legacy()` moves a pre-multi-note `note.md` into `notes/` on first `list_notes`.
+**Notes are plain files, no database.** Each note is `{id}.md` under `~/Library/Application Support/com.poom.memotepad/notes/`, where `id` is a nanosecond timestamp string. `list_notes` reads every file, derives a title (first non-empty line, heading marks stripped) and preview, and returns them sorted newest-first. Note ids must be ASCII-alphanumeric — `note_file()` enforces this, which also blocks path traversal. `migrate_legacy()` moves a pre-multi-note `note.md` into `notes/` on first `list_notes`.
 
 **Title derivation is duplicated on purpose.** The Rust `derive()` (for the palette list) and the `activeTitle` memo in [src/App.tsx](src/App.tsx) must stay in sync — both take the first non-empty line and strip leading `#`. Change one, change the other.
 
