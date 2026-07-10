@@ -31,6 +31,9 @@
   --ring: rgba(0, 0, 0, 0.12);
   --hi: rgba(255, 255, 255, 0.5);
   --hover: rgba(0, 0, 0, 0.06);
+  /* Text selection — opaque enough to stay legible over any backdrop and
+     across wrapped lines (a translucent tint washed the text out). */
+  --sel: rgba(59, 130, 246, 0.28);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -45,6 +48,8 @@
     --ring: rgba(255, 255, 255, 0.08);
     --hi: rgba(255, 255, 255, 0.08);
     --hover: rgba(255, 255, 255, 0.08);
+    /* Deeper, more saturated so light text keeps contrast on selected lines. */
+    --sel: rgba(72, 112, 190, 0.5);
   }
 }
 

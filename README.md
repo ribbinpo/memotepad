@@ -41,8 +41,12 @@ Memonotepad is a Raycast/Spotlight-style floating note. It lives in your menu ba
 - **Global show/hide hotkey** — summon or dismiss the note from anywhere with `⌥.` (Option + Period).
 - **Menu bar app** — runs as a background agent with no Dock icon; left-click the tray icon to toggle, or use its Show / Quit menu.
 - **Live Markdown editing** — a single always-editable surface (CodeMirror 6). Headings grow, `**bold**` renders bold, and syntax marks dim on inactive lines. No mode switching.
+- **Rendered components** — tables, dividers (`---`), task checkboxes (`- [ ]`), radios (`- ( )`), and links render as real components right in the editor; click a checkbox to toggle it or a link to open it. Put the cursor on the line and the raw Markdown reappears so you can edit it.
+- **Formatting toolbar** — don't know Markdown? A bottom toolbar inserts headings, bold, italic, lists, checklists, quotes, links, and code blocks for you.
+- **Action Panel** — a `⌘K` command palette listing every action and its shortcut (new note, browse notes, export, resize, opacity, …). Search and run anything from one place.
 - **Styled code** — inline `` `code` `` gets a pill background and fenced ` ``` ` blocks get a tinted band.
-- **Multiple notes + search** — a `⌘K` command palette to search, open, create, and delete notes.
+- **Multiple notes + search** — a `⌘P` palette to search, open, create, and delete notes.
+- **Export** — copy the current note to your Downloads folder (`⌘E`) and reveal it in Finder.
 - **Auto-save** — every keystroke is debounced and written to disk; nothing to save manually.
 - **Plain-text storage** — notes are just Markdown files in your app-data folder. No lock-in, no database.
 - **Manual & snap resizing** — drag any edge/corner to resize, or snap to preset sizes with `⌘1`–`⌘3`.
@@ -55,13 +59,15 @@ Memonotepad is a Raycast/Spotlight-style floating note. It lives in your menu ba
 | Shortcut | Action |
 | --- | --- |
 | `⌥.` | Show / hide the note (global, works anywhere) |
-| `⌘K` | Open the notes search palette |
+| `⌘K` | Open the Action Panel (all commands) |
+| `⌘P` | Browse notes (search palette) |
 | `⌘N` | New note |
-| `↑` / `↓` · `↵` | Navigate / open a note (in the palette) |
-| `⌘⌫` | Delete the selected note (in the palette) |
+| `⌘E` | Export the current note to Downloads |
+| `↑` / `↓` · `↵` | Navigate / run the highlighted row (in a panel) |
+| `⌘⌫` | Delete the selected note (in the browse palette) |
 | `⌘1` · `⌘2` · `⌘3` | Snap to compact / default / large size |
 | `⌘+` / `⌘-` | Increase / decrease opacity |
-| `Esc` | Close the palette, or hide the window |
+| `Esc` | Close the panel, or hide the window |
 
 ## 🚀 Getting started
 
