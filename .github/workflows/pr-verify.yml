@@ -1,0 +1,40 @@
+name: PR Verify
+
+# Compile gates for every pull request. The repo has no unit tests, so we run
+# the two checks CLAUDE.md documents as "run before submitting": the frontend
+# typecheck/build and `cargo check`. Runs on macOS because `tauri-nspanel` is a
+# macOS-only git dependency — `cargo check` fails on Linux.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: pr-verify-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+
+      - name: Typecheck + frontend build
+        run: npm run build
+
+      - name: cargo check
+        run: cargo check --manifest-path src-tauri/Cargo.toml --locked

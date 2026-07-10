@@ -1,0 +1,89 @@
+name: Release
+
+# On merge to main: build the macOS .dmg for both architectures and upload each
+# to Cloudflare R2 (S3-compatible) under a versioned path plus a stable `latest`.
+# The app is distributed unsigned (see README's Gatekeeper note), so no Apple
+# signing secrets are required.
+#
+# Required repository secrets:
+#   R2_ACCOUNT_ID          Cloudflare account id (used in the endpoint URL)
+#   R2_ACCESS_KEY_ID       R2 API token access key
+#   R2_SECRET_ACCESS_KEY   R2 API token secret
+#   R2_BUCKET              target bucket name
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  build-and-upload:
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            arch: aarch64
+          - target: x86_64-apple-darwin
+            arch: x64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+          key: ${{ matrix.target }}
+
+      - name: Build .dmg
+        run: npm run tauri build -- --target ${{ matrix.target }}
+
+      - name: Locate artifacts
+        id: artifacts
+        run: |
+          set -euo pipefail
+          VERSION=$(jq -r .version src-tauri/tauri.conf.json)
+          DMG=$(ls src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg | head -n1)
+          if [ -z "$DMG" ]; then
+            echo "No .dmg found for ${{ matrix.target }}" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "dmg=$DMG" >> "$GITHUB_OUTPUT"
+
+      - name: Upload to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          DMG: ${{ steps.artifacts.outputs.dmg }}
+          VERSION: ${{ steps.artifacts.outputs.version }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          name="memonotepad-${ARCH}.dmg"
+          for key in "memonotepad/releases/v${VERSION}/${name}" "memonotepad/releases/latest/${name}"; do
+            echo "Uploading to s3://${R2_BUCKET}/${key}"
+            aws s3 cp "$DMG" "s3://${R2_BUCKET}/${key}" \
+              --endpoint-url "$endpoint" \
+              --checksum-algorithm CRC32 \
+              --content-type application/x-apple-diskimage
+          done
