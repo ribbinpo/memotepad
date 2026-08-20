@@ -60,6 +60,22 @@ const IconActions = (
   </svg>
 );
 
+// Eye = "you are reading"; pencil = "you are editing". The button shows the
+// mode you're in, not the one you'd switch to.
+const IconEye = (
+  <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M1.5 8s2.4-4 6.5-4 6.5 4 6.5 4-2.4 4-6.5 4-6.5-4-6.5-4Z" />
+    <circle cx="8" cy="8" r="1.75" />
+  </svg>
+);
+
+const IconPencil = (
+  <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M11.2 2.6a1.6 1.6 0 0 1 2.2 2.2L5.6 12.6l-3 .8.8-3 7.8-7.8Z" />
+    <path d="M10.4 3.4 12.6 5.6" />
+  </svg>
+);
+
 const IconTrash = (
   <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
     <path d="M3 4.5h10" />
@@ -205,6 +221,12 @@ function App() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [content, setContent] = useState("");
   const [overlay, setOverlay] = useState<Overlay>(null);
+  // "read" makes the note render-only: the document goes read-only, which is
+  // also what tells the live preview to stop revealing raw source (see
+  // `overlaps` in editor.ts). Deliberately not persisted — it's a per-glance
+  // state, not a setting.
+  const [mode, setMode] = useState<"edit" | "read">("edit");
+  const rootRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(0);
   // Note id awaiting a second click to confirm deletion (guards accidental taps).
@@ -356,6 +378,24 @@ function App() {
     setOverlay("notes");
   }
 
+  function toggleMode() {
+    setMode((m) => (m === "edit" ? "read" : "edit"));
+    hideTip();
+  }
+
+  // Read mode makes CodeMirror non-editable, so it drops focus to <body> —
+  // which sits *outside* the React root, where `handleKeyDown` can never see a
+  // keystroke. Without this the mode would be a one-way trip: no ⌘E back, no
+  // ⌘K, no esc. Park focus on the root instead (it is `tabIndex={-1}`), and
+  // hand it back to the editor on the way out. Closing a palette lands here
+  // too — that unmounts its input, which would otherwise drop focus to <body>
+  // all over again.
+  useEffect(() => {
+    if (overlay !== null) return; // a palette is open and owns focus
+    if (mode === "read") rootRef.current?.focus();
+    else editorRef.current?.view?.focus();
+  }, [mode, overlay]);
+
   function openActions() {
     setQuery("");
     setSelected(0);
@@ -372,7 +412,8 @@ function App() {
   const actions: ActionItem[] = [
     { id: "new", label: "New Note", hint: "⌘N", run: () => newNote() },
     { id: "browse", label: "Browse Notes", hint: "⌘P", run: () => openNotes() },
-    { id: "export", label: "Export Note to Downloads", hint: "⌘E", run: () => { closeOverlay(); exportNote(); } },
+    { id: "mode", label: mode === "edit" ? "Read Mode" : "Edit Mode", hint: "⌘E", run: () => { closeOverlay(); toggleMode(); } },
+    { id: "export", label: "Export Note to Downloads", hint: "⌘⇧E", run: () => { closeOverlay(); exportNote(); } },
     { id: "size1", label: "Compact Size", hint: "⌘1", run: () => { closeOverlay(); snapSize(300, 360); } },
     { id: "size2", label: "Default Size", hint: "⌘2", run: () => { closeOverlay(); snapSize(360, 440); } },
     { id: "size3", label: "Large Size", hint: "⌘3", run: () => { closeOverlay(); snapSize(480, 600); } },
@@ -387,7 +428,7 @@ function App() {
     return actions.filter((a) => a.label.toLowerCase().includes(q));
     // `actions` is rebuilt each render; `query` is the real filter input.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, content, notes, opacity]);
+  }, [query, content, notes, opacity, mode]);
 
   // ---- markdown formatting (bottom toolbar) -----------------------------
   // The toolbar and the ⌘B/⌘I keymap share one set of commands (src/format.tsx);
@@ -503,9 +544,12 @@ function App() {
       newNote();
       return;
     }
+    // ⌘E toggles read/edit; ⌘⇧E exports. `key` is already lowercased, so the
+    // shift check is what keeps these two apart.
     if (mod && key === "e") {
       e.preventDefault();
-      exportNote();
+      if (e.shiftKey) exportNote();
+      else toggleMode();
       return;
     }
 
@@ -560,7 +604,9 @@ function App() {
 
   return (
     <div
-      className="relative h-full [opacity:var(--opacity,1)] transition-opacity duration-[120ms]"
+      ref={rootRef}
+      tabIndex={-1}
+      className="relative h-full outline-none [opacity:var(--opacity,1)] transition-opacity duration-[120ms]"
       onKeyDown={handleKeyDown}
     >
       <ResizeHandles />
@@ -632,7 +678,24 @@ function App() {
           </div>
         </header>
 
-        <div className="flex min-h-0 flex-1">
+        <div className="relative flex min-h-0 flex-1">
+          {/* Read/edit switch — floats at the top-right of the note, just under
+              the title, so it sits with the content it governs. */}
+          {overlay === null && (
+            <button
+              type="button"
+              title={mode === "edit" ? "Edit mode — ⌘E to read" : "Read mode — ⌘E to edit"}
+              aria-label={mode === "edit" ? "Switch to read mode (⌘E)" : "Switch to edit mode (⌘E)"}
+              aria-pressed={mode === "read"}
+              className={`absolute right-2 top-2 z-20 inline-flex h-6 w-[26px] cursor-pointer items-center justify-center rounded-md border border-rule bg-card backdrop-blur-[20px] transition-colors hover:bg-hover active:translate-y-[0.5px] ${
+                mode === "read" ? "text-accent" : "text-muted hover:text-card-fg"
+              }`}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={toggleMode}
+            >
+              {mode === "read" ? IconEye : IconPencil}
+            </button>
+          )}
           {overlay === "notes" ? (
             <div className="flex h-full w-full flex-col overflow-hidden text-card-fg">
               <input
@@ -772,8 +835,12 @@ function App() {
               basicSetup={editorSetup}
               theme="none"
               height="100%"
+              editable={mode === "edit"}
+              readOnly={mode === "read"}
               placeholder={
-                "Write anything here…\n\n⌘K actions · ⌘P notes · ⌘N new · esc hide"
+                mode === "read"
+                  ? "Nothing to read yet.\n\n⌘E to edit"
+                  : "Write anything here…\n\n⌘K actions · ⌘P notes · ⌘N new · esc hide"
               }
               autoFocus
             />
@@ -798,6 +865,14 @@ function App() {
                 <kbd className="font-sans text-muted">{tip.hint}</kbd>
               </div>
             )}
+            {mode === "read" ? (
+              <div className="flex min-w-0 items-center gap-1.5 pl-1 text-[0.75em] text-muted">
+                <span className="flex-none">{IconEye}</span>
+                <span className="truncate">Read mode ·</span>
+                <kbd className="flex-none font-sans">⌘E</kbd>
+                <span className="truncate">to edit</span>
+              </div>
+            ) : (
             <div className="flex min-w-0 items-center gap-0.5 overflow-x-auto">
               {formatTools.map((f) => (
                 <button
@@ -814,6 +889,7 @@ function App() {
                 </button>
               ))}
             </div>
+            )}
             <button
               type="button"
               aria-label="Actions (⌘K)"

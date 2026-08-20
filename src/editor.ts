@@ -326,8 +326,11 @@ const DIVIDER_RE = /^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/;
 const markerAt = (lineFrom: number, m: RegExpExecArray) =>
   lineFrom + m[1].length + m[2].length;
 
+// "Is the cursor on this span?" — the whole live-preview reveal rule. In read
+// mode (a read-only document) nothing counts as active, so the note renders
+// end to end and never flashes its raw source.
 const overlaps = (state: EditorState, from: number, to: number) =>
-  state.selection.ranges.some((r) => r.from <= to && r.to >= from);
+  !state.readOnly && state.selection.ranges.some((r) => r.from <= to && r.to >= from);
 
 // ---- inline live preview (marks, dividers, checkboxes, radios, links) -----
 // These are all single-line decorations, so they're safe to serve from a view
@@ -460,7 +463,14 @@ export const livePreview = ViewPlugin.fromClass(
       this.decorations = inlineDecorations(view);
     }
     update(u: ViewUpdate) {
-      if (u.docChanged || u.selectionSet || u.viewportChanged) {
+      // `reconfigured` catches the read/edit switch: it changes what `overlaps`
+      // answers without touching the doc or the selection.
+      if (
+        u.docChanged ||
+        u.selectionSet ||
+        u.viewportChanged ||
+        u.transactions.some((tr) => tr.reconfigured)
+      ) {
         this.decorations = inlineDecorations(u.view);
       }
     }
@@ -481,6 +491,9 @@ export const livePreview = ViewPlugin.fromClass(
             invoke("open_external", { url: href }).catch(() => {});
           return true;
         }
+        // Read mode renders only: links still open, nothing else may touch the
+        // doc or drop a cursor into it.
+        if (view.state.readOnly) return true;
         if (target.dataset.mdTable) {
           view.dispatch({ selection: { anchor: Number(target.dataset.from) } });
           view.focus();
@@ -530,7 +543,7 @@ function tableDecorations(state: EditorState): DecorationSet {
 export const tableView = StateField.define<DecorationSet>({
   create: (state) => tableDecorations(state),
   update(deco, tr) {
-    if (tr.docChanged || tr.selection) return tableDecorations(tr.state);
+    if (tr.docChanged || tr.selection || tr.reconfigured) return tableDecorations(tr.state);
     return deco;
   },
   provide: (f) => EditorView.decorations.from(f),
@@ -593,7 +606,7 @@ function buildCodeDecorations(state: EditorState): DecorationSet {
 export const codeBackground = StateField.define<DecorationSet>({
   create: (state) => buildCodeDecorations(state),
   update(deco, tr) {
-    if (tr.docChanged || tr.selection) return buildCodeDecorations(tr.state);
+    if (tr.docChanged || tr.selection || tr.reconfigured) return buildCodeDecorations(tr.state);
     return deco;
   },
   provide: (f) => EditorView.decorations.from(f),

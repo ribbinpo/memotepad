@@ -90,6 +90,7 @@ function escapeRun(state: EditorState, pos: number, ch: string) {
 
 function toggleInline(ch: string, n: number): Command {
   return (view) => {
+    if (view.state.readOnly) return false; // read mode
     const { state } = view;
     const sel = state.selection.main;
     const cursor = sel.empty ? escapeRun(state, sel.head, ch) : -1;
@@ -178,6 +179,7 @@ function mapSel(state: EditorState, changes: ChangeDesc) {
 
 function togglePrefix(p: LinePrefix): Command {
   return (view) => {
+    if (view.state.readOnly) return false; // read mode
     const { state } = view;
     const lines = touchedLines(state);
     // Blank lines can never carry a prefix, so counting them would make "every
@@ -236,6 +238,7 @@ function fenceAt(state: EditorState, pos: number) {
 }
 
 const toggleCodeBlock: Command = (view) => {
+  if (view.state.readOnly) return false; // read mode
   const { state } = view;
   const doc = state.doc;
   const sel = state.selection.main;
@@ -283,6 +286,7 @@ const toggleCodeBlock: Command = (view) => {
 const URL_RE = /^(?:https?:\/\/|mailto:)\S+$/i;
 
 const insertLink: Command = (view) => {
+  if (view.state.readOnly) return false; // read mode
   const { state } = view;
   const sel = state.selection.main;
   const picked = state.sliceDoc(sel.from, sel.to).trim();
