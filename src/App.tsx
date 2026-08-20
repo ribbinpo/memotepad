@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalSize, LogicalPosition } from "@tauri-apps/api/dpi";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
-import { EditorView } from "@codemirror/view";
+import { EditorView, type Command } from "@codemirror/view";
 import { syntaxHighlighting } from "@codemirror/language";
 import {
   markdownExtension,
@@ -13,6 +13,7 @@ import {
   tableView,
   codeBackground,
 } from "./editor";
+import { formatTools, formatKeymap } from "./format";
 import "./App.css";
 
 const editorExtensions = [
@@ -23,6 +24,7 @@ const editorExtensions = [
   livePreview,
   tableView,
   codeBackground,
+  formatKeymap,
 ];
 
 const toolbarBtn =
@@ -55,25 +57,6 @@ const IconActions = (
     <line x1="3" y1="4.5" x2="13" y2="4.5" />
     <line x1="3" y1="8" x2="13" y2="8" />
     <line x1="3" y1="11.5" x2="13" y2="11.5" />
-  </svg>
-);
-
-const IconLink = (
-  <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
-    <path d="M6.6 9.4 9.4 6.6" />
-    <path d="M7.3 4.6 8.5 3.4a2.3 2.3 0 0 1 3.3 3.3L10.6 7.9" />
-    <path d="M8.7 11.4 7.5 12.6a2.3 2.3 0 0 1-3.3-3.3L5.4 8.1" />
-  </svg>
-);
-
-const IconList = (
-  <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
-    <line x1="6" y1="4.5" x2="13" y2="4.5" />
-    <line x1="6" y1="8" x2="13" y2="8" />
-    <line x1="6" y1="11.5" x2="13" y2="11.5" />
-    <circle cx="3" cy="4.5" r="0.9" fill="currentColor" stroke="none" />
-    <circle cx="3" cy="8" r="0.9" fill="currentColor" stroke="none" />
-    <circle cx="3" cy="11.5" r="0.9" fill="currentColor" stroke="none" />
   </svg>
 );
 
@@ -407,84 +390,59 @@ function App() {
   }, [query, content, notes, opacity]);
 
   // ---- markdown formatting (bottom toolbar) -----------------------------
-  // Wrap the selection with `before`/`after` (e.g. ** … **) and leave the inner
-  // text selected so the user can keep typing over it.
-  function surround(before: string, after = before) {
+  // The toolbar and the ⌘B/⌘I keymap share one set of commands (src/format.tsx);
+  // this is just the click path handing them the live view.
+  function runFormat(cmd: Command) {
     const view = editorRef.current?.view;
     if (!view) return;
-    const { state } = view;
-    const r = state.selection.main;
-    const inner = state.sliceDoc(r.from, r.to);
-    view.dispatch({
-      changes: { from: r.from, to: r.to, insert: before + inner + after },
-      selection: { anchor: r.from + before.length, head: r.from + before.length + inner.length },
-      scrollIntoView: true,
-    });
+    cmd(view);
     view.focus();
   }
 
-  // Add a line prefix (`# `, `- `, `> `, `- [ ] `) to every line the selection
-  // touches — the building block for headings, lists and quotes.
-  function prefixLines(prefix: string) {
-    const view = editorRef.current?.view;
-    if (!view) return;
-    const { state } = view;
-    const r = state.selection.main;
-    const first = state.doc.lineAt(r.from).number;
-    const last = state.doc.lineAt(r.to).number;
-    const changes = [];
-    for (let n = first; n <= last; n++)
-      changes.push({ from: state.doc.line(n).from, insert: prefix });
-    const added = prefix.length;
-    view.dispatch({
-      changes,
-      selection: { anchor: r.from + added, head: r.to + added * (last - first + 1) },
-      scrollIntoView: true,
-    });
-    view.focus();
+  // ---- toolbar tooltips -------------------------------------------------
+  // Hand-rolled rather than the native `title`: the OS tooltip is slow, ignores
+  // the panel's styling, and paints outside the translucent card.
+  const [tip, setTip] = useState<{ label: string; hint: string; x: number } | null>(null);
+  const tipRef = useRef<HTMLDivElement>(null);
+  const barRef = useRef<HTMLElement>(null);
+  const tipTimer = useRef<number | undefined>(undefined);
+  // Sweeping across ten small buttons would strobe, so the first tooltip waits
+  // — after that the bar stays "warm" and the rest appear instantly.
+  const tipWarm = useRef(false);
+
+  function showTip(e: React.MouseEvent<HTMLElement>, label: string, hint: string) {
+    const btn = e.currentTarget;
+    window.clearTimeout(tipTimer.current);
+    const show = () => {
+      const bar = barRef.current;
+      if (!bar) return;
+      const b = btn.getBoundingClientRect();
+      tipWarm.current = true;
+      setTip({ label, hint, x: b.left + b.width / 2 - bar.getBoundingClientRect().left });
+    };
+    if (tipWarm.current) show();
+    else tipTimer.current = window.setTimeout(show, 350);
   }
 
-  function insertLink() {
-    const view = editorRef.current?.view;
-    if (!view) return;
-    const { state } = view;
-    const r = state.selection.main;
-    const text = state.sliceDoc(r.from, r.to) || "text";
-    const urlAt = r.from + text.length + 3; // "[" + text + "]("
-    view.dispatch({
-      changes: { from: r.from, to: r.to, insert: `[${text}](url)` },
-      selection: { anchor: urlAt, head: urlAt + 3 }, // select "url"
-      scrollIntoView: true,
-    });
-    view.focus();
+  function hideTip() {
+    window.clearTimeout(tipTimer.current);
+    setTip(null);
+    tipTimer.current = window.setTimeout(() => (tipWarm.current = false), 250);
   }
 
-  function codeBlock() {
-    const view = editorRef.current?.view;
-    if (!view) return;
-    const { state } = view;
-    const r = state.selection.main;
-    const inner = state.sliceDoc(r.from, r.to);
-    view.dispatch({
-      changes: { from: r.from, to: r.to, insert: "```\n" + inner + "\n```" },
-      selection: { anchor: r.from + 4, head: r.from + 4 + inner.length }, // after "```\n"
-      scrollIntoView: true,
-    });
-    view.focus();
-  }
+  useEffect(() => () => window.clearTimeout(tipTimer.current), []);
 
-  const formatTools = [
-    { key: "h", title: "Heading", node: <span className="font-bold">H</span>, run: () => prefixLines("# ") },
-    { key: "b", title: "Bold", node: <span className="font-bold">B</span>, run: () => surround("**") },
-    { key: "i", title: "Italic", node: <span className="italic" style={{ fontFamily: "Georgia, serif" }}>I</span>, run: () => surround("*") },
-    { key: "s", title: "Strikethrough", node: <span className="line-through">S</span>, run: () => surround("~~") },
-    { key: "code", title: "Inline code", node: <span className="font-mono text-[0.8em]">{"</>"}</span>, run: () => surround("`") },
-    { key: "link", title: "Link", node: IconLink, run: () => insertLink() },
-    { key: "ul", title: "Bullet list", node: IconList, run: () => prefixLines("- ") },
-    { key: "task", title: "Checklist", node: <span className="text-[0.95em]">☑</span>, run: () => prefixLines("- [ ] ") },
-    { key: "quote", title: "Quote", node: <span style={{ fontFamily: "Georgia, serif" }} className="text-[1.1em] leading-none">”</span>, run: () => prefixLines("> ") },
-    { key: "codeblock", title: "Code block", node: <span className="font-mono text-[0.8em]">{"{ }"}</span>, run: () => codeBlock() },
-  ];
+  // Centre on the button, but keep the whole bubble inside the card — the first
+  // and last tools would otherwise hang off the edge in a narrow window. Runs
+  // before paint, so the pre-clamp position is never visible.
+  useLayoutEffect(() => {
+    const el = tipRef.current;
+    const bar = barRef.current;
+    if (!tip || !el || !bar) return;
+    const w = el.offsetWidth;
+    el.style.transform = "none";
+    el.style.left = `${Math.max(4, Math.min(tip.x - w / 2, bar.clientWidth - w - 4))}px`;
+  }, [tip]);
 
   // ---- search -----------------------------------------------------------
   const filtered = useMemo(() => {
@@ -824,16 +782,33 @@ function App() {
 
         {/* bottom — markdown formatting toolbar (editor view only) */}
         {overlay === null && (
-          <footer className="flex h-9 flex-none items-center justify-between gap-2 border-t border-rule bg-bar pl-1.5 pr-2">
+          <footer
+            ref={barRef}
+            className="relative flex h-9 flex-none items-center justify-between gap-2 border-t border-rule bg-bar pl-1.5 pr-2"
+            onMouseLeave={hideTip}
+          >
+            {/* Lives outside the scrolling row below, which would clip it. */}
+            {tip && (
+              <div
+                ref={tipRef}
+                style={{ left: tip.x, transform: "translateX(-50%)" }}
+                className="pointer-events-none absolute bottom-full z-20 mb-1.5 flex items-center gap-1.5 whitespace-nowrap rounded-md border border-rule bg-card px-2 py-1 text-[0.7em] leading-none text-card-fg shadow-[0_2px_10px_rgba(0,0,0,0.16)] backdrop-blur-[20px]"
+              >
+                {tip.label}
+                <kbd className="font-sans text-muted">{tip.hint}</kbd>
+              </div>
+            )}
             <div className="flex min-w-0 items-center gap-0.5 overflow-x-auto">
               {formatTools.map((f) => (
                 <button
-                  key={f.key}
+                  key={f.id}
                   type="button"
-                  title={f.title}
+                  aria-label={`${f.title} (${f.hint})`}
                   className={fmtBtn}
+                  onMouseEnter={(e) => showTip(e, f.title, f.hint)}
+                  onMouseLeave={hideTip}
                   onMouseDown={(e) => e.preventDefault()}
-                  onClick={f.run}
+                  onClick={() => runFormat(f.run)}
                 >
                   {f.node}
                 </button>
@@ -841,7 +816,7 @@ function App() {
             </div>
             <button
               type="button"
-              title="Actions (⌘K)"
+              aria-label="Actions (⌘K)"
               className="flex flex-none cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-[0.75em] text-muted transition-colors hover:bg-hover hover:text-card-fg active:translate-y-[0.5px]"
               onMouseDown={(e) => e.preventDefault()}
               onClick={openActions}

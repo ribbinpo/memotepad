@@ -41,7 +41,7 @@ Memotepad is a Raycast/Spotlight-style floating note. It lives in your menu bar,
 - **Menu bar app** — runs as a background agent with no Dock icon; left-click the tray icon to toggle, or use its Show / Quit menu.
 - **Live Markdown editing** — a single always-editable surface (CodeMirror 6). Headings grow, `**bold**` renders bold, and syntax marks dim on inactive lines. No mode switching.
 - **Rendered components** — tables, dividers (`---`), task checkboxes (`- [ ]`), radios (`- ( )`), and links render as real components right in the editor; click a checkbox to toggle it or a link to open it. Put the cursor on the line and the raw Markdown reappears so you can edit it.
-- **Formatting toolbar** — don't know Markdown? A bottom toolbar inserts headings, bold, italic, lists, checklists, quotes, links, and code blocks for you.
+- **Formatting toolbar** — don't know Markdown? A bottom toolbar applies headings, bold, italic, lists, checklists, quotes, links, and code blocks for you. Every tool is a toggle — press it again to take the formatting back off — and each has a shortcut (`⌘B`, `⌘I`, …). With nothing selected they act on the word under the cursor.
 - **Action Panel** — a `⌘K` command palette listing every action and its shortcut (new note, browse notes, export, resize, opacity, …). Search and run anything from one place.
 - **Styled code** — inline `` `code` `` gets a pill background and fenced ` ``` ` blocks get a tinted band.
 - **Multiple notes + search** — a `⌘P` palette to search, open, create, and delete notes.
@@ -67,6 +67,23 @@ Memotepad is a Raycast/Spotlight-style floating note. It lives in your menu bar,
 | `⌘1` · `⌘2` · `⌘3` | Snap to compact / default / large size |
 | `⌘+` / `⌘-` | Increase / decrease opacity |
 | `Esc` | Close the panel, or hide the window |
+
+### Formatting (in the editor)
+
+Every one of these is a toggle — press again to remove the formatting. With no selection they act on the word under the cursor.
+
+| Shortcut | Action |
+| --- | --- |
+| `⌘B` | Bold |
+| `⌘I` | Italic |
+| `⌘⇧X` | Strikethrough |
+| `⌘⇧C` | Inline code |
+| `⌘⇧K` | Link |
+| `⌘⇧H` | Heading |
+| `⌘⇧8` | Bullet list |
+| `⌘⇧7` | Checklist |
+| `⌘⇧9` | Quote |
+| `⌘⌥⇧C` | Code block |
 
 ## 🚀 Getting started
 
