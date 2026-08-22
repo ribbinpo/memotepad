@@ -1,6 +1,6 @@
 ---
 name: release-r2
-description: Build memotepad's macOS .dmg and publish it to Cloudflare R2 under a user-supplied version folder plus `latest`. Use when the user asks to release, ship, publish, cut a version, or upload a build to R2.
+description: Build memotepad's macOS .dmg, publish it to Cloudflare R2 under a user-supplied version folder plus `latest`, then commit the version bump, tag it, and push. Use when the user asks to release, ship, publish, cut a version, or upload a build to R2.
 ---
 
 # Release to R2
@@ -30,10 +30,25 @@ no missing `v`. If the user gives `0.3.0`, normalize to `v0.3.0` and say so; if
 they give something that isn't three numeric parts (`v0.3`, `v0.3.0-beta`), ask
 them to restate it — the script rejects it anyway.
 
-If the version doesn't match `src-tauri/tauri.conf.json`, the script prints a
-warning and continues. Relay it: the folder name will disagree with the version
-the app reports about itself. Offer to bump `tauri.conf.json`, `package.json`,
-and `src-tauri/Cargo.toml` (all three must match) and rebuild.
+### Bump the version files first
+
+The release version is also the app's own version, so **before building**, set
+it in all three files — they must agree:
+
+| File | Line |
+| --- | --- |
+| `src-tauri/tauri.conf.json` | `"version": "0.3.1"` |
+| `package.json` | `"version": "0.3.1"` |
+| `src-tauri/Cargo.toml` | `version = "0.3.1"` under `[package]` (line 3 — not the `version = "2"` dependency pins further down) |
+
+Drop the leading `v`: the folder is `v0.3.1`, the files carry `0.3.1`. The build
+rewrites `src-tauri/Cargo.lock` to match, so that file is expected to show up
+modified too.
+
+If you skip this and the version disagrees with `tauri.conf.json`, the script
+prints a warning and continues — the published folder would then disagree with
+the version the app reports about itself. Relay the warning and fix it rather
+than shipping the mismatch.
 
 ## 2. Credentials
 
@@ -78,12 +93,41 @@ Options:
 The build is a Rust release compile — several minutes. Run it in the foreground
 with a generous timeout so failures surface.
 
-## 4. Afterwards
+## 4. Commit, tag, push
 
-- Report both keys (and the public URLs if `R2_PUBLIC_BASE_URL` is set).
+Only after the upload succeeds — a failed build must not leave a version-bump
+commit behind. The commit is what the tag points at, so the tag pins the source
+that actually produced the published `.dmg`.
+
+```bash
+git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
+git commit -m "Release v0.3.1"
+git tag v0.3.1
+git push origin main --follow-tags
+```
+
+Notes on each step:
+
+- **Commit** — include `src-tauri/Cargo.lock`; the build rewrote it. If the
+  working tree also holds unrelated edits, commit only these four files and tell
+  the user what you left uncommitted.
+- **Tag** — annotated is fine (`git tag -a v0.3.1 -m "..."`), but `--follow-tags`
+  only pushes annotated tags, so with a lightweight tag push it explicitly:
+  `git push origin v0.3.1`.
+- **Push** — pushing and tagging are outward-facing and hard to undo once others
+  fetch. Invoking this skill authorizes them for *this* release; don't carry that
+  approval into a later one. If the tag already exists (a re-publish of the same
+  version), say so and leave it alone rather than force-moving it — moving a tag
+  others have fetched is the one step to stop and ask about.
+- If the branch isn't `main`, push that branch instead and say which one.
+
+## 5. Afterwards
+
+- Report both keys (and the public URLs if `R2_PUBLIC_BASE_URL` is set), plus
+  the commit and tag you pushed.
 - Offer to update the README download table if its link or version is stale.
-- Offer to tag the release (`git tag v0.3.0`) if the user wants the source
-  pinned to what was published.
+  (It currently points at `latest/` with no version in the URL, so usually it
+  needs nothing.)
 
 ## Notes
 
