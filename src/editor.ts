@@ -42,7 +42,13 @@ export const noteTheme = EditorView.theme({
   },
   ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--card-fg)" },
   ".cm-placeholder": { color: "var(--muted)" },
-  "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection": {
+  ".cm-selectionBackground, ::selection": { backgroundColor: "var(--sel)" },
+  // The base theme paints the *focused* selection a hard-coded pale `#d7d4f0`
+  // through a 5-class selector, which outranked the plain rule above — in dark
+  // mode that washed the selected text out to near-unreadable. Mirror the base
+  // selector shape exactly: equal specificity, and theme modules mount after
+  // the base theme, so `--sel` wins.
+  "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground": {
     backgroundColor: "var(--sel)",
   },
   // Inline `code` — a rounded pill so it stands out from body text.
