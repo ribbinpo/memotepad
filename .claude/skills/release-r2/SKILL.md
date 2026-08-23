@@ -1,6 +1,6 @@
 ---
 name: release-r2
-description: Build memotepad's macOS .dmg, publish it to Cloudflare R2 under a user-supplied version folder plus `latest`, then commit the version bump, tag it, and push. Use when the user asks to release, ship, publish, cut a version, or upload a build to R2.
+description: Build memotepad's macOS .dmg, publish it to Cloudflare R2 under a user-supplied version folder plus `latest`, then commit the version bump, tag it, push, and cut the matching GitHub release with the .dmg attached. Use when the user asks to release, ship, publish, cut a version, or upload a build to R2.
 ---
 
 # Release to R2
@@ -121,10 +121,44 @@ Notes on each step:
   others have fetched is the one step to stop and ask about.
 - If the branch isn't `main`, push that branch instead and say which one.
 
-## 5. Afterwards
+## 5. Cut the GitHub release
+
+Only after the tag is pushed — `gh release create` needs the tag to exist on the
+remote, and a release pointing at a tag nobody can fetch is worse than none.
+
+```bash
+gh release create v0.3.1 \
+  --title "v0.3.1" \
+  --notes "$(git log --pretty='- %s' v0.3.0..v0.3.1)" \
+  "src-tauri/target/release/bundle/dmg/memotepad-aarch64.dmg"
+```
+
+- **The `.dmg` path is the *renamed* one.** Step 3 renames the bundle in place to
+  `memotepad-{arch}.dmg`, so attach that — the same filename users get from R2,
+  not the `memotepad_0.3.1_aarch64.dmg` tauri produced. For `--target both`,
+  attach both arch files. Skip the attachment entirely if the run used
+  `--dry-run`; there is nothing published to point at.
+- **Notes** — generate from the commits between the previous tag and this one
+  (`git log --pretty='- %s' <prev>..<this>`). If that range is empty or reads as
+  noise, write a short human summary instead. `--generate-notes` is a fine
+  substitute when the repo has PRs to draw on; this one mostly doesn't.
+- **Already exists** — if `gh release view v0.3.1` succeeds, a release is already
+  there. Report it and leave it alone; don't `--clobber` assets or delete and
+  recreate. Re-uploading a single asset onto an existing release is only OK when
+  the user asks for exactly that (`gh release upload v0.3.1 <file> --clobber`).
+- **Not authenticated** — `gh auth status` failing is not a release failure. The
+  `.dmg` is already on R2 and the tag is already pushed, which is what users
+  actually consume. Say that `gh` needs `gh auth login` and stop; don't fall back
+  to opening a browser or hand-crafting an API call with a token from the chat.
+- A GitHub release is public the moment it is created. Invoking this skill
+  authorizes it for *this* version, the same way the push is authorized — but if
+  the repo is public and this is the first release ever cut on it, say so before
+  running the command rather than after.
+
+## 6. Afterwards
 
 - Report both keys (and the public URLs if `R2_PUBLIC_BASE_URL` is set), plus
-  the commit and tag you pushed.
+  the commit and tag you pushed and the GitHub release URL.
 - Offer to update the README download table if its link or version is stale.
   (It currently points at `latest/` with no version in the URL, so usually it
   needs nothing.)
