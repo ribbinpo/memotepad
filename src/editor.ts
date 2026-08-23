@@ -489,23 +489,33 @@ export const livePreview = ViewPlugin.fromClass(
           "[data-md-toggle], [data-md-link], [data-md-table]",
         ) as HTMLElement | null;
         if (!target) return false;
-        e.preventDefault();
+        // Read mode forbids editing the *markdown source*, not interacting with
+        // the rendered note — so each branch decides for itself, and
+        // preventDefault only fires where we actually handle the click.
+        const ro = view.state.readOnly;
 
         if (target.dataset.mdLink) {
+          e.preventDefault();
           const href = target.dataset.href ?? "";
           if (/^(https?:|mailto:)/i.test(href))
             invoke("open_external", { url: href }).catch(() => {});
           return true;
         }
-        // Read mode renders only: links still open, nothing else may touch the
-        // doc or drop a cursor into it.
-        if (view.state.readOnly) return true;
+
         if (target.dataset.mdTable) {
+          // Clicking a table means "let me edit the raw rows", which read mode
+          // has no cursor for. Fall through to CodeMirror instead — that is
+          // what makes drag-selecting across a rendered table work.
+          if (ro) return false;
+          e.preventDefault();
           view.dispatch({ selection: { anchor: Number(target.dataset.from) } });
           view.focus();
           return true;
         }
 
+        // Checkboxes and radios stay live in read mode: ticking one acts on the
+        // rendered document, the same class of action as following a link.
+        e.preventDefault();
         const at = Number(target.dataset.from);
         if (target.dataset.mdToggle === "check") {
           const checked = /[xX]/.test(view.state.doc.sliceString(at, at + 3));
@@ -513,7 +523,9 @@ export const livePreview = ViewPlugin.fromClass(
         } else {
           toggleRadio(view, at);
         }
-        view.focus();
+        // Read mode parks focus on the app root (see App.tsx); pulling it into
+        // a non-editable view would strand every ⌘-shortcut.
+        if (!ro) view.focus();
         return true;
       },
     },

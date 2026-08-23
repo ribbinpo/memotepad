@@ -1,4 +1,11 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalSize, LogicalPosition } from "@tauri-apps/api/dpi";
@@ -244,6 +251,17 @@ function App() {
 
   activeIdRef.current = activeId;
 
+  // Focus whichever surface owns keystrokes right now. In read mode that is the
+  // root div (`tabIndex={-1}`), not the editor: a non-editable CodeMirror has
+  // `contenteditable="false"` and no tabindex, so `view.focus()` is a no-op that
+  // would leave focus on <body> — *outside* the React root, where `handleKeyDown`
+  // never sees it. That makes read mode a one-way trip: no ⌘E back, no ⌘K, no esc.
+  const focusSurface = useCallback(() => {
+    if (overlay) searchRef.current?.focus();
+    else if (mode === "read") rootRef.current?.focus();
+    else editorRef.current?.view?.focus();
+  }, [overlay, mode]);
+
   // ---- persistence helpers ---------------------------------------------
   function clearPendingSave() {
     if (saveTimer.current) {
@@ -327,23 +345,24 @@ function App() {
     })();
   }, []);
 
-  // Re-focus editor when the window regains focus (e.g. via ⌥. hotkey).
+  // Re-focus the active surface when the window regains focus (e.g. via ⌥. hotkey).
   useEffect(() => {
     const unlisten = getCurrentWindow().onFocusChanged(
       ({ payload: focused }) => {
-        if (focused && !overlay) editorRef.current?.view?.focus();
+        if (focused) focusSurface();
       },
     );
     return () => {
       unlisten.then((f) => f());
     };
-  }, [overlay]);
+  }, [focusSurface]);
 
-  // Keep focus on whichever pane is showing so shortcuts always land.
+  // Keep focus on whichever pane is showing so shortcuts always land. Closing a
+  // palette lands here too — that unmounts its input, which would otherwise drop
+  // focus to <body> all over again.
   useEffect(() => {
-    if (overlay) searchRef.current?.focus();
-    else editorRef.current?.view?.focus();
-  }, [overlay]);
+    focusSurface();
+  }, [focusSurface]);
 
   // Apply + persist the note's translucency.
   useEffect(() => {
@@ -382,19 +401,6 @@ function App() {
     setMode((m) => (m === "edit" ? "read" : "edit"));
     hideTip();
   }
-
-  // Read mode makes CodeMirror non-editable, so it drops focus to <body> —
-  // which sits *outside* the React root, where `handleKeyDown` can never see a
-  // keystroke. Without this the mode would be a one-way trip: no ⌘E back, no
-  // ⌘K, no esc. Park focus on the root instead (it is `tabIndex={-1}`), and
-  // hand it back to the editor on the way out. Closing a palette lands here
-  // too — that unmounts its input, which would otherwise drop focus to <body>
-  // all over again.
-  useEffect(() => {
-    if (overlay !== null) return; // a palette is open and owns focus
-    if (mode === "read") rootRef.current?.focus();
-    else editorRef.current?.view?.focus();
-  }, [mode, overlay]);
 
   function openActions() {
     setQuery("");
