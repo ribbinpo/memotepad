@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Build memotepad's macOS .dmg and upload it to Cloudflare R2.
+# Build memotepad's macOS .dmg + signed updater artifact and upload them to
+# Cloudflare R2, along with the latest.json manifest the in-app updater polls.
 #
 # Mirrors .github/workflows/backup/release.yml: same credentials, same object
 # keys (versioned + `latest`), so a local publish is indistinguishable from a
@@ -98,9 +99,9 @@ selftest() {
   fi
 }
 
-# put_object <local-file> <object-key>
+# put_object <local-file> <object-key> [content-type]
 put_object() {
-  local file=$1 key=$2
+  local file=$1 key=$2 ctype=${3:-application/x-apple-diskimage}
   local host="${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
   local uri="/${R2_BUCKET}/${key}"
   local amzdate datestamp payload
@@ -108,7 +109,6 @@ put_object() {
   datestamp=${amzdate%%T*}
   payload=$(sha256_file_hex "$file")
 
-  local ctype="application/x-apple-diskimage"
   local headers
   headers=$(printf 'content-type:%s\nhost:%s\nx-amz-content-sha256:%s\nx-amz-date:%s\n' \
     "$ctype" "$host" "$payload" "$amzdate")
@@ -174,7 +174,19 @@ if [ ${#missing[@]} -gt 0 ] && [ "$DRY_RUN" -eq 0 ]; then
 fi
 
 R2_PREFIX=${R2_PREFIX:-memotepad/releases}
-R2_PUBLIC_BASE_URL=${R2_PUBLIC_BASE_URL:-}
+# The manifest's download URLs are built from this, so it must stay the public
+# face of the bucket — and match the updater endpoint in tauri.conf.json.
+R2_PUBLIC_BASE_URL=${R2_PUBLIC_BASE_URL:-https://r2-dev.ribbinpo.dev}
+
+# The build signs the updater artifact (bundle.createUpdaterArtifacts), so a
+# missing key would only surface minutes into the compile — fail fast instead.
+if [ "$SKIP_BUILD" -eq 0 ] && [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+  echo "TAURI_SIGNING_PRIVATE_KEY is not set (see .env.example) — the build" >&2
+  echo "cannot sign the updater artifact without it." >&2
+  exit 1
+fi
+
+command -v jq >/dev/null || { echo "jq is required (builds latest.json)." >&2; exit 1; }
 
 # Targets ---------------------------------------------------------------------
 host_target() {
@@ -214,6 +226,9 @@ conf_version=$(jq -r .version src-tauri/tauri.conf.json 2>/dev/null || echo "")
 if [ -n "$conf_version" ] && [ "$conf_version" != "null" ] && [ "v${conf_version}" != "$VERSION" ]; then
   echo "  warning: src-tauri/tauri.conf.json says v${conf_version}, publishing as ${VERSION}"
 fi
+
+# Per-platform entries for the updater manifest, accumulated across archs.
+platforms_json="{}"
 
 for entry in "${targets[@]}"; do
   read -r target arch <<<"$entry"
@@ -271,7 +286,80 @@ for entry in "${targets[@]}"; do
       [ -n "$R2_PUBLIC_BASE_URL" ] && echo "    ${R2_PUBLIC_BASE_URL%/}/${key}"
     fi
   done
+
+  # Updater artifact: the signed .app.tar.gz the in-app updater downloads.
+  # createUpdaterArtifacts drops it in bundle/macos, next to the dmg's dir.
+  macos_dir="$(dirname "$(dirname "$dmg")")/macos"
+  tarball=""
+  tar_candidates=()
+  for f in "$macos_dir"/*.app.tar.gz; do [ -f "$f" ] && tar_candidates+=("$f"); done
+  [ ${#tar_candidates[@]} -gt 0 ] && tarball=$(ls -t "${tar_candidates[@]}" | head -n1)
+  if [ -z "$tarball" ] || [ ! -f "${tarball}.sig" ]; then
+    echo "No signed updater artifact (*.app.tar.gz + .sig) in ${macos_dir}." >&2
+    echo "Pre-updater builds don't have one — rebuild without --skip-build," >&2
+    echo "with TAURI_SIGNING_PRIVATE_KEY set." >&2
+    exit 1
+  fi
+
+  tar_name="memotepad-${arch}.app.tar.gz"
+  tar_renamed="${macos_dir}/${tar_name}"
+  if [ "$tarball" != "$tar_renamed" ]; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "  [dry-run] would rename to ${tar_renamed}(.sig)"
+    else
+      mv -f "$tarball" "$tar_renamed"
+      mv -f "${tarball}.sig" "${tar_renamed}.sig"
+      tarball="$tar_renamed"
+    fi
+  fi
+
+  tar_keys=("${R2_PREFIX}/${VERSION}/${tar_name}")
+  [ "$PUBLISH_LATEST" -eq 1 ] && tar_keys+=("${R2_PREFIX}/latest/${tar_name}")
+  for key in "${tar_keys[@]}"; do
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "  [dry-run] would PUT s3://${R2_BUCKET:-<bucket>}/${key}"
+    else
+      put_object "$tarball" "$key" "application/gzip"
+    fi
+  done
+
+  # The manifest points at the *versioned* URL — immutable, so an update that
+  # was checked is the one that installs even if latest/ moves on meanwhile.
+  case "$arch" in
+    aarch64) plat="darwin-aarch64" ;;
+    x64) plat="darwin-x86_64" ;;
+    *) echo "No updater platform mapping for arch '${arch}'" >&2; exit 1 ;;
+  esac
+  sig_content=""
+  [ "$DRY_RUN" -eq 0 ] && sig_content=$(cat "${tarball}.sig")
+  platforms_json=$(jq --arg k "$plat" --arg sig "$sig_content" \
+    --arg url "${R2_PUBLIC_BASE_URL%/}/${R2_PREFIX}/${VERSION}/${tar_name}" \
+    '. + {($k): {signature: $sig, url: $url}}' <<<"$platforms_json")
 done
+
+# latest.json — what the app's updater polls. Written after the loop so a
+# --target both run publishes one manifest carrying both platforms.
+manifest=$(jq -n \
+  --arg version "${VERSION#v}" \
+  --arg notes "memotepad ${VERSION}" \
+  --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --argjson platforms "$platforms_json" \
+  '{version: $version, notes: $notes, pub_date: $pub_date, platforms: $platforms}')
+
+manifest_file=$(mktemp)
+printf '%s\n' "$manifest" >"$manifest_file"
+manifest_keys=("${R2_PREFIX}/${VERSION}/latest.json")
+[ "$PUBLISH_LATEST" -eq 1 ] && manifest_keys+=("${R2_PREFIX}/latest/latest.json")
+echo
+for key in "${manifest_keys[@]}"; do
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "[dry-run] would PUT s3://${R2_BUCKET:-<bucket>}/${key}"
+  else
+    put_object "$manifest_file" "$key" "application/json"
+    [ -n "$R2_PUBLIC_BASE_URL" ] && echo "    ${R2_PUBLIC_BASE_URL%/}/${key}"
+  fi
+done
+rm -f "$manifest_file"
 
 echo
 echo "Done."

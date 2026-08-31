@@ -7,7 +7,10 @@ import {
   useState,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { check, type Update } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 import { LogicalSize, LogicalPosition } from "@tauri-apps/api/dpi";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { EditorView, type Command } from "@codemirror/view";
@@ -242,6 +245,15 @@ function App() {
     const v = parseFloat(localStorage.getItem("opacity") ?? "1");
     return Number.isNaN(v) ? 1 : Math.min(1, Math.max(0.4, v));
   });
+  // In-app updater. `update` holds a found-but-not-installed update (also what
+  // lights the dot on the ⌘K button); `updateState` phases the single action
+  // row through check → download → relaunch. Errors stay non-fatal: the app is
+  // a notepad first, and the R2 endpoint may simply be unreachable offline.
+  const [update, setUpdate] = useState<Update | null>(null);
+  const [updateState, setUpdateState] = useState<
+    "idle" | "checking" | "none" | "installing" | "error"
+  >("idle");
+  const [appVersion, setAppVersion] = useState("");
 
   const editorRef = useRef<ReactCodeMirrorRef>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -345,6 +357,49 @@ function App() {
     })();
   }, []);
 
+  // Silent update check shortly after launch — a hit just lights the dot on
+  // the ⌘K button; installing stays a deliberate action in the panel. Delayed
+  // so first paint and note load never wait on the network.
+  useEffect(() => {
+    getVersion().then(setAppVersion, () => {});
+    const t = window.setTimeout(() => {
+      check().then((u) => u && setUpdate(u), () => {});
+    }, 3000);
+    return () => window.clearTimeout(t);
+  }, []);
+
+  // One action row drives the whole update flow; which step runs depends on
+  // whether a found update is already in hand.
+  async function runUpdate() {
+    if (updateState === "checking" || updateState === "installing") return;
+    try {
+      if (update) {
+        setUpdateState("installing");
+        await update.downloadAndInstall();
+        await relaunch();
+        return;
+      }
+      setUpdateState("checking");
+      const u = await check();
+      setUpdate(u);
+      setUpdateState(u ? "idle" : "none");
+    } catch {
+      setUpdateState("error");
+    }
+  }
+
+  const updateLabel = update
+    ? updateState === "installing"
+      ? `Installing v${update.version}…`
+      : `Install Update v${update.version}`
+    : updateState === "checking"
+      ? "Checking for Updates…"
+      : updateState === "none"
+        ? "You're Up to Date"
+        : updateState === "error"
+          ? "Update Check Failed — Retry"
+          : "Check for Updates";
+
   // Re-focus the active surface when the window regains focus (e.g. via ⌥. hotkey).
   useEffect(() => {
     const unlisten = getCurrentWindow().onFocusChanged(
@@ -425,6 +480,9 @@ function App() {
     { id: "size3", label: "Large Size", hint: "⌘3", run: () => { closeOverlay(); snapSize(480, 600); } },
     { id: "opac-up", label: "Increase Opacity", hint: "⌘+", run: () => setOpacity((o) => clampOpacity(o + 0.1)) },
     { id: "opac-down", label: "Decrease Opacity", hint: "⌘−", run: () => setOpacity((o) => clampOpacity(o - 0.1)) },
+    // Runs in place — the panel stays open so the label can walk through
+    // checking/installing states where other rows would close it.
+    { id: "update", label: updateLabel, hint: appVersion && `v${appVersion}`, run: () => { runUpdate(); } },
     { id: "hide", label: "Hide Window", hint: "esc", run: () => { getCurrentWindow().hide(); } },
   ];
 
@@ -434,7 +492,7 @@ function App() {
     return actions.filter((a) => a.label.toLowerCase().includes(q));
     // `actions` is rebuilt each render; `query` is the real filter input.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, content, notes, opacity, mode]);
+  }, [query, content, notes, opacity, mode, update, updateState, appVersion]);
 
   // ---- markdown formatting (bottom toolbar) -----------------------------
   // The toolbar and the ⌘B/⌘I keymap share one set of commands (src/format.tsx);
@@ -675,11 +733,14 @@ function App() {
             </button>
             <button
               type="button"
-              title="Actions (⌘K)"
-              className={`${toolbarBtn}${overlay === "actions" ? " text-accent" : ""}`}
+              title={update ? `Update v${update.version} available (⌘K)` : "Actions (⌘K)"}
+              className={`relative ${toolbarBtn}${overlay === "actions" ? " text-accent" : ""}`}
               onClick={() => (overlay === "actions" ? closeOverlay() : openActions())}
             >
               {IconActions}
+              {update && (
+                <span className="absolute right-[3px] top-[3px] h-1.5 w-1.5 rounded-full bg-accent" />
+              )}
             </button>
           </div>
         </header>
