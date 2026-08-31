@@ -31,6 +31,8 @@ Memotepad is a Raycast/Spotlight-style floating note. It lives in your menu bar,
 > xattr -dr com.apple.quarantine /Applications/memotepad.app
 > ```
 
+Once installed, memotepad keeps itself current: it checks for new versions in the background, and you can update in place from the Actions panel (`⌘K` → **Check for Updates**).
+
 ---
 
 ## ✨ Features

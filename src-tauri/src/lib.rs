@@ -375,6 +375,13 @@ pub fn run() {
         };
         use tauri_plugin_window_state::StateFlags;
 
+        // In-app updates: `check()` fetches latest.json from R2, and the process
+        // plugin provides the relaunch after an update is installed. Both are
+        // driven from the frontend (the ⌘K "Check for Updates" action).
+        builder = builder
+            .plugin(tauri_plugin_updater::Builder::new().build())
+            .plugin(tauri_plugin_process::init());
+
         // Persist only window geometry — not visibility — so the note always
         // starts shown, wherever you last left it.
         builder = builder.plugin(

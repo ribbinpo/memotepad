@@ -1,16 +1,26 @@
 ---
 name: release-r2
-description: Build memotepad's macOS .dmg, publish it to Cloudflare R2 under a user-supplied version folder plus `latest`, then commit the version bump, tag it, push, and cut the matching GitHub release with the .dmg attached. Use when the user asks to release, ship, publish, cut a version, or upload a build to R2.
+description: Build memotepad's macOS .dmg plus signed auto-updater artifact, publish both with the updater's latest.json manifest to Cloudflare R2 under a user-supplied version folder plus `latest`, then commit the version bump, tag it, push, and cut the matching GitHub release with the .dmg attached. Use when the user asks to release, ship, publish, cut a version, or upload a build to R2.
 ---
 
 # Release to R2
 
-Publishes the `.dmg` to Cloudflare R2 under two keys per architecture:
+Publishes three kinds of artifact to Cloudflare R2, each under a versioned key
+and (unless `--no-latest`) a `latest/` key:
 
 ```
-{bucket}/memotepad/releases/{version}/memotepad-{arch}.dmg
-{bucket}/memotepad/releases/latest/memotepad-{arch}.dmg
+{bucket}/memotepad/releases/{version}/memotepad-{arch}.dmg          # user download
+{bucket}/memotepad/releases/{version}/memotepad-{arch}.app.tar.gz   # signed updater artifact
+{bucket}/memotepad/releases/{version}/latest.json                   # updater manifest
+{bucket}/memotepad/releases/latest/…                                # same three, stable keys
 ```
+
+The app's in-app updater (Actions panel → "Check for Updates", plus a silent
+check at launch) polls `releases/latest/latest.json` — the endpoint baked into
+`src-tauri/tauri.conf.json` — and downloads the `.app.tar.gz` the manifest
+points at, verifying it against the minisign signature embedded in the
+manifest. **Publishing `latest.json` is what actually ships the update to
+existing users**; the `.dmg` only serves new downloads.
 
 R2 has no real directories — writing those keys is what creates the
 `releases/{version}/` "folder", so no separate mkdir step exists or is needed.
@@ -61,11 +71,20 @@ the user, never commit it). `.env.example` is the template:
 | `R2_ACCESS_KEY_ID` | R2 API token access key id (Object Read & Write) |
 | `R2_SECRET_ACCESS_KEY` | R2 API token secret |
 | `R2_BUCKET` | Target bucket name |
+| `TAURI_SIGNING_PRIVATE_KEY` | Path to (or content of) the updater signing key — the build signs the `.app.tar.gz` with it. Generated once via `npm run tauri signer generate`; its public half is pinned in `tauri.conf.json`. |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | The key's password (empty if it was generated without one) |
 
 Optional: `R2_PREFIX` (default `memotepad/releases`) and `R2_PUBLIC_BASE_URL`
-(e.g. `https://r2-dev.ribbinpo.dev`) — only used to echo the download URL after
-upload. If a required variable is missing the script names it; report that
-rather than guessing a value or asking for secrets in the chat.
+(default `https://r2-dev.ribbinpo.dev`) — used for the download URLs written
+into `latest.json`, so it must stay the bucket's public hostname and match the
+updater endpoint in `tauri.conf.json`. If a required variable is missing the
+script names it; report that rather than guessing a value or asking for
+secrets in the chat.
+
+**The signing key is irreplaceable.** If `TAURI_SIGNING_PRIVATE_KEY` is missing
+or the file is gone, stop and tell the user — generating a fresh key would
+publish updates that every installed copy of the app rejects (their pinned
+pubkey wouldn't match). Never print the key.
 
 ## 3. Publish
 
@@ -73,11 +92,15 @@ rather than guessing a value or asking for secrets in the chat.
 .claude/skills/release-r2/release-r2.sh --version v0.3.0
 ```
 
-The script builds, then renames the freshly built bundle
-(`memotepad_0.3.0_aarch64.dmg`) to the stable published filename
-`memotepad-aarch64.dmg`, then PUTs it to both keys. Uploading is a publish:
-confirm the version and that `latest/` will be overwritten before the first
-real run of a session, and use `--dry-run` if anything is unclear.
+The script builds, renames the freshly built bundles to stable published
+filenames (`memotepad_0.3.0_aarch64.dmg` → `memotepad-aarch64.dmg`, and the
+updater's `memotepad.app.tar.gz`(+`.sig`) → `memotepad-aarch64.app.tar.gz`),
+PUTs the `.dmg` and `.app.tar.gz` to their versioned + `latest` keys, then
+writes `latest.json` (version, signature, versioned download URL per platform)
+and PUTs that too. Uploading is a publish — and `latest.json` in particular
+rolls the update out to every installed copy: confirm the version and that
+`latest/` will be overwritten before the first real run of a session, and use
+`--dry-run` if anything is unclear.
 
 Options:
 
@@ -85,9 +108,9 @@ Options:
 | --- | --- |
 | `--version <vX.Y.Z>` | **Required.** The release folder name. |
 | `--target host\|aarch64\|x64\|both` | Which arch to build (default `host`). |
-| `--skip-build` | Upload the newest `.dmg` already in `src-tauri/target/`, no rebuild. |
-| `--dry-run` | Print the rename and the keys, change and upload nothing. |
-| `--no-latest` | Publish only the versioned key. |
+| `--skip-build` | Upload the newest `.dmg`/`.app.tar.gz` already in `src-tauri/target/`, no rebuild. Fails if the last build predates the updater (no signed `.app.tar.gz`). |
+| `--dry-run` | Print the renames and the keys, change and upload nothing. |
+| `--no-latest` | Publish only the versioned keys (including a versioned `latest.json`, but not the `latest/` one the app polls — so existing users see nothing). |
 | `--selftest` | Verify the SigV4 signer against AWS's test vector. |
 
 The build is a Rust release compile — several minutes. Run it in the foreground
@@ -168,8 +191,16 @@ gh release create v0.3.1 \
 - Uploads are hand-signed S3 `PUT`s (openssl + curl), so no `aws`, `wrangler`,
   or `rclone` install is required. On `SignatureDoesNotMatch`, run `--selftest`
   first: if it passes, the signer is fine and the credentials or account id are
-  the problem.
+  the problem. `jq` is also required (it builds `latest.json`).
 - Re-running with the same `--version` overwrites those objects silently.
+- **A single-arch run writes a single-platform `latest.json`** — publishing
+  only `aarch64` after an x64 release existed drops `darwin-x86_64` from the
+  manifest, and Intel installs stop seeing updates. Today releases are
+  aarch64-only so this is moot, but the day both ship, use `--target both` so
+  one manifest carries both platforms.
+- The updater compares the manifest's `version` against the app's own, so a
+  release only reaches users if the bumped version is greater — one more
+  reason step 1's bump must not be skipped.
 - The app is unsigned/unnotarized — no Apple secrets involved, and users get the
   Gatekeeper warning the README documents.
 - Key layout mirrors `.github/workflows/backup/release.yml`; if that workflow is
