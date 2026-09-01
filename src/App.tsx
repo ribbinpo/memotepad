@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { check, type Update } from "@tauri-apps/plugin-updater";
@@ -83,6 +84,26 @@ const IconPencil = (
   <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
     <path d="M11.2 2.6a1.6 1.6 0 0 1 2.2 2.2L5.6 12.6l-3 .8.8-3 7.8-7.8Z" />
     <path d="M10.4 3.4 12.6 5.6" />
+  </svg>
+);
+
+// Plug = the MCP server: clients "plug into" the notes. Outline while off,
+// filled body while running — the state reads without color alone.
+const IconPlug = (
+  <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M6 1.5v3" />
+    <path d="M10 1.5v3" />
+    <path d="M4.5 4.5h7V7a3.5 3.5 0 0 1-7 0V4.5Z" />
+    <path d="M8 10.5v4" />
+  </svg>
+);
+
+const IconPlugOn = (
+  <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M6 1.5v3" />
+    <path d="M10 1.5v3" />
+    <path d="M4.5 4.5h7V7a3.5 3.5 0 0 1-7 0V4.5Z" fill="currentColor" />
+    <path d="M8 10.5v4" />
   </svg>
 );
 
@@ -226,6 +247,9 @@ type ActionItem = {
   run: () => void;
 };
 
+// A create/delete request from an MCP client, waiting for Approve/Deny.
+type McpApproval = { id: number; tool: string; summary: string };
+
 function App() {
   const [notes, setNotes] = useState<NoteMeta[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -254,12 +278,21 @@ function App() {
     "idle" | "checking" | "none" | "installing" | "error"
   >("idle");
   const [appVersion, setAppVersion] = useState("");
+  // Local MCP server (Rust side, src-tauri/src/mcp.rs). The toggle is persisted
+  // to localStorage so the server comes back on the next launch.
+  const [mcpState, setMcpState] = useState<"off" | "starting" | "on" | "error">(
+    "off",
+  );
+  const [mcpPort, setMcpPort] = useState<number | null>(null);
+  // Queue of pending MCP approval requests; only the first renders as a card.
+  const [mcpApprovals, setMcpApprovals] = useState<McpApproval[]>([]);
 
   const editorRef = useRef<ReactCodeMirrorRef>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const saveTimer = useRef<number | null>(null);
   const activeIdRef = useRef<string | null>(null);
   const didInit = useRef(false);
+  const didMcpInit = useRef(false);
 
   activeIdRef.current = activeId;
 
@@ -400,6 +433,130 @@ function App() {
           ? "Update Check Failed — Retry"
           : "Check for Updates";
 
+  // ---- MCP server -------------------------------------------------------
+  const mcpUrl = mcpPort ? `http://127.0.0.1:${mcpPort}/mcp` : null;
+
+  const mcpLabel =
+    mcpState === "on"
+      ? "Stop MCP Server"
+      : mcpState === "starting"
+        ? "Starting MCP Server…"
+        : mcpState === "error"
+          ? "MCP Failed to Start — Retry"
+          : "Start MCP Server";
+
+  async function toggleMcp() {
+    if (mcpState === "starting") return;
+    if (mcpState === "on") {
+      try {
+        await invoke("stop_mcp");
+      } catch {
+        /* worst case the server is already gone */
+      }
+      setMcpState("off");
+      setMcpPort(null);
+      localStorage.setItem("mcp", "0");
+      return;
+    }
+    setMcpState("starting");
+    try {
+      const port = await invoke<number>("start_mcp");
+      setMcpPort(port);
+      setMcpState("on");
+      localStorage.setItem("mcp", "1");
+    } catch {
+      setMcpState("error");
+    }
+  }
+
+  // Resync with an already-running server (a dev HMR reload remounts React but
+  // leaves the Rust side up), else honor the persisted toggle. Ref-guarded:
+  // StrictMode double-invokes effects, and two racing start_mcp calls could
+  // each bind a port. Runs after the notes init so first paint never waits.
+  useEffect(() => {
+    if (didMcpInit.current) return;
+    didMcpInit.current = true;
+    (async () => {
+      try {
+        const running = await invoke<number | null>("mcp_status");
+        if (running) {
+          setMcpPort(running);
+          setMcpState("on");
+          return;
+        }
+        if (localStorage.getItem("mcp") === "1") {
+          setMcpState("starting");
+          const port = await invoke<number>("start_mcp");
+          setMcpPort(port);
+          setMcpState("on");
+        }
+      } catch {
+        setMcpState("error");
+      }
+    })();
+  }, []);
+
+  function respondApproval(id: number, approve: boolean, always = false) {
+    invoke("respond_mcp_approval", { id, approve, always });
+    setMcpApprovals((q) => q.filter((a) => a.id !== id));
+  }
+
+  // Approval requests arrive as Tauri events from the blocked tool call; the
+  // "resolved" event dismisses a card the user never answered (timeout).
+  useEffect(() => {
+    const unReq = listen<McpApproval>("mcp-approval-request", (e) => {
+      setMcpApprovals((q) => [...q, e.payload]);
+    });
+    const unRes = listen<{ id: number }>("mcp-approval-resolved", (e) => {
+      setMcpApprovals((q) => q.filter((a) => a.id !== e.payload.id));
+    });
+    return () => {
+      unReq.then((f) => f());
+      unRes.then((f) => f());
+    };
+  }, []);
+
+  // MCP mutations land on disk behind React's back — refresh the list and deal
+  // with the open note. Concurrent human+MCP edits of the same note are
+  // last-writer-wins by design. (Safe as a mount-only effect: everything used
+  // in here reaches state through refs or stable setters.)
+  useEffect(() => {
+    const un = listen<{ id: string; kind: "write" | "create" | "delete" }>(
+      "notes-changed",
+      async (e) => {
+        const metas = await refreshNotes();
+        const { id, kind } = e.payload;
+        if (id !== activeIdRef.current) return;
+        if (kind === "delete") {
+          // Same recovery as deleteNote's wasActive path — and clear the
+          // debounce so a pending save can't resurrect the deleted file.
+          clearPendingSave();
+          if (metas.length) {
+            await openNote(metas[0].id, { save: false });
+          } else {
+            const nid = await invoke<string>("create_note");
+            await refreshNotes();
+            await openNote(nid, { save: false });
+          }
+        } else if (kind === "write") {
+          // Local unsaved edits win: with a save pending, skip the reload and
+          // let the debounced write overwrite the MCP edit; otherwise show the
+          // new text.
+          if (!saveTimer.current) {
+            const text = await invoke<string>("read_note", { id });
+            setContent(text);
+          }
+        }
+        // kind === "create" never matches the active id; the new note just
+        // appears in the list without yanking the user to it.
+      },
+    );
+    return () => {
+      un.then((f) => f());
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Re-focus the active surface when the window regains focus (e.g. via ⌥. hotkey).
   useEffect(() => {
     const unlisten = getCurrentWindow().onFocusChanged(
@@ -483,6 +640,11 @@ function App() {
     // Runs in place — the panel stays open so the label can walk through
     // checking/installing states where other rows would close it.
     { id: "update", label: updateLabel, hint: appVersion && `v${appVersion}`, run: () => { runUpdate(); } },
+    // Also runs in place, so the label can walk off/starting/on without closing.
+    { id: "mcp", label: mcpLabel, hint: mcpPort ? `:${mcpPort}` : "", run: () => { toggleMcp(); } },
+    ...(mcpUrl
+      ? [{ id: "mcp-copy", label: "Copy MCP URL", hint: mcpUrl, run: () => { navigator.clipboard.writeText(mcpUrl); closeOverlay(); } }]
+      : []),
     { id: "hide", label: "Hide Window", hint: "esc", run: () => { getCurrentWindow().hide(); } },
   ];
 
@@ -492,7 +654,7 @@ function App() {
     return actions.filter((a) => a.label.toLowerCase().includes(q));
     // `actions` is rebuilt each render; `query` is the real filter input.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, content, notes, opacity, mode, update, updateState, appVersion]);
+  }, [query, content, notes, opacity, mode, update, updateState, appVersion, mcpState, mcpPort]);
 
   // ---- markdown formatting (bottom toolbar) -----------------------------
   // The toolbar and the ⌘B/⌘I keymap share one set of commands (src/format.tsx);
@@ -571,6 +733,14 @@ function App() {
   async function handleKeyDown(e: React.KeyboardEvent) {
     const mod = e.metaKey || e.ctrlKey;
     const key = e.key.toLowerCase();
+
+    // An MCP approval card is showing — Escape denies it. Approve stays
+    // click-only so Enter keeps inserting newlines in the editor underneath.
+    if (mcpApprovals.length > 0 && e.key === "Escape") {
+      e.preventDefault();
+      respondApproval(mcpApprovals[0].id, false);
+      return;
+    }
 
     // Opacity: ⌘+ / ⌘- (work in any view).
     if (mod && (e.key === "=" || e.key === "+")) {
@@ -717,6 +887,37 @@ function App() {
           <div className="flex items-center gap-px">
             <button
               type="button"
+              title={
+                mcpState === "on" && mcpUrl
+                  ? `MCP server on — ${mcpUrl} (click to stop)`
+                  : mcpState === "starting"
+                    ? "Starting MCP server…"
+                    : mcpState === "error"
+                      ? "MCP server failed to start — click to retry"
+                      : "Start MCP server"
+              }
+              aria-label={mcpState === "on" ? "Stop MCP server" : "Start MCP server"}
+              aria-pressed={mcpState === "on"}
+              className={`inline-flex h-6 min-w-[26px] cursor-pointer items-center justify-center gap-1 rounded-md px-1 transition-colors hover:bg-hover active:translate-y-[0.5px] ${
+                mcpState === "on"
+                  ? "text-accent"
+                  : mcpState === "starting"
+                    ? "animate-pulse text-muted"
+                    : mcpState === "error"
+                      ? "text-[#ff5f57]"
+                      : "text-muted hover:text-card-fg"
+              }`}
+              onClick={toggleMcp}
+            >
+              {mcpState === "on" ? IconPlugOn : IconPlug}
+              {mcpState === "on" && mcpPort && (
+                <span className="text-[0.7em] font-[550] tabular-nums leading-none">
+                  {mcpPort}
+                </span>
+              )}
+            </button>
+            <button
+              type="button"
               title="Browse notes (⌘P)"
               className={`${toolbarBtn}${overlay === "notes" ? " text-accent" : ""}`}
               onClick={() => (overlay === "notes" ? closeOverlay() : openNotes())}
@@ -744,6 +945,52 @@ function App() {
             </button>
           </div>
         </header>
+
+        {/* MCP approval card — deliberately NOT an Overlay variant: it's
+            triggered externally (a blocked MCP tool call), must show over any
+            view, and never takes focus (focusSurface stays untouched; esc is
+            handled at the top of handleKeyDown). */}
+        {mcpApprovals.length > 0 && (
+          <div className="absolute inset-x-2 top-10 z-30 select-none rounded-lg border border-rule bg-card p-3 shadow-[0_4px_12px_rgba(0,0,0,0.18)] backdrop-blur-[20px]">
+            <div className="text-[0.7em] font-[650] uppercase tracking-wide text-muted">
+              MCP request
+            </div>
+            <div className="mt-1 text-[0.9em] font-[550] text-card-fg">
+              {mcpApprovals[0].summary}
+            </div>
+            <div className="mt-2 flex items-center justify-end gap-1">
+              <button
+                type="button"
+                className="cursor-pointer rounded-md bg-[#ff5f57] px-2 py-1 text-[0.75em] font-[550] text-white transition-opacity hover:opacity-90 active:translate-y-[0.5px]"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => respondApproval(mcpApprovals[0].id, false)}
+              >
+                Deny
+              </button>
+              <button
+                type="button"
+                className="cursor-pointer rounded-md px-2 py-1 text-[0.75em] font-[550] text-muted transition-colors hover:bg-hover hover:text-card-fg active:translate-y-[0.5px]"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => respondApproval(mcpApprovals[0].id, true, true)}
+              >
+                Always Allow
+              </button>
+              <button
+                type="button"
+                className="cursor-pointer rounded-md bg-accent px-2 py-1 text-[0.75em] font-[550] text-white transition-opacity hover:opacity-90 active:translate-y-[0.5px]"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => respondApproval(mcpApprovals[0].id, true)}
+              >
+                Approve
+              </button>
+            </div>
+            {mcpApprovals.length > 1 && (
+              <div className="mt-1 text-right text-[0.7em] text-muted">
+                +{mcpApprovals.length - 1} more waiting
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="relative flex min-h-0 flex-1">
           {/* Read/edit switch — floats at the top-right of the note, just under

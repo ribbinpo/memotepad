@@ -1,3 +1,5 @@
+mod mcp;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -22,20 +24,21 @@ fn app_dir(app: &AppHandle) -> Result<PathBuf, String> {
     app.path().app_data_dir().map_err(|e| e.to_string())
 }
 
-fn notes_dir(app: &AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn notes_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app_dir(app)?.join(NOTES_DIR))
 }
 
 /// Resolve `notes/{id}.md`, rejecting anything that isn't a plain alphanumeric id
-/// (ids are generated as digit strings, so this also blocks path traversal).
-fn note_file(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
+/// (ids are generated as digit strings, so this also blocks path traversal —
+/// including for ids arriving from MCP clients).
+pub(crate) fn note_file(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
     if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric()) {
         return Err("invalid note id".into());
     }
     Ok(notes_dir(app)?.join(format!("{id}.md")))
 }
 
-fn new_id() -> String {
+pub(crate) fn new_id() -> String {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
@@ -43,7 +46,7 @@ fn new_id() -> String {
     nanos.to_string()
 }
 
-fn modified_millis(path: &Path) -> u64 {
+pub(crate) fn modified_millis(path: &Path) -> u64 {
     fs::metadata(path)
         .and_then(|m| m.modified())
         .ok()
@@ -54,7 +57,7 @@ fn modified_millis(path: &Path) -> u64 {
 
 /// First non-empty line becomes the title (Markdown heading marks stripped);
 /// the following text becomes a short preview.
-fn derive(content: &str) -> (String, String) {
+pub(crate) fn derive(content: &str) -> (String, String) {
     let mut lines = content
         .lines()
         .map(str::trim)
@@ -124,7 +127,7 @@ fn unique_path(path: PathBuf) -> PathBuf {
 }
 
 /// One-time move of the old single `note.md` into `notes/` so upgrades keep data.
-fn migrate_legacy(app: &AppHandle) -> Result<(), String> {
+pub(crate) fn migrate_legacy(app: &AppHandle) -> Result<(), String> {
     let legacy = app_dir(app)?.join(LEGACY_FILE);
     if !legacy.exists() {
         return Ok(());
@@ -278,7 +281,7 @@ fn make_panel(win: &tauri::WebviewWindow) {
 
 /// Bring the note to the front and focus it.
 #[cfg(desktop)]
-fn show_window(app: &AppHandle) {
+pub(crate) fn show_window(app: &AppHandle) {
     #[cfg(target_os = "macos")]
     {
         use tauri_nspanel::ManagerExt;
@@ -361,7 +364,11 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let mut builder = tauri::Builder::default().plugin(tauri_plugin_opener::init());
+    let mut builder = tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        // MCP server handle + pending approvals — the frontend starts/stops it
+        // via the start_mcp/stop_mcp commands.
+        .manage(mcp::McpState::default());
 
     #[cfg(target_os = "macos")]
     {
@@ -436,7 +443,11 @@ pub fn run() {
             create_note,
             delete_note,
             export_note,
-            open_external
+            open_external,
+            mcp::start_mcp,
+            mcp::stop_mcp,
+            mcp::mcp_status,
+            mcp::respond_mcp_approval
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
