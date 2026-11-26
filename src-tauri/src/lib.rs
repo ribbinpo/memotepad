@@ -248,14 +248,34 @@ fn open_external(url: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Convert the main window into a non-activating floating panel so it can overlay
-/// other apps' fullscreen Spaces (and appear on every Space) the way Raycast does.
+/// (Re-)apply the panel's window level and Spaces behavior. macOS silently drops
+/// `CanJoinAllSpaces` from a long-lived panel — Spaces created after the panel was
+/// configured (every new fullscreen app is one) aren't joined, and sleep/display
+/// changes can strip it too — which pins the note to the Desktop Space. So this
+/// runs before every show, not just once at setup.
 #[cfg(target_os = "macos")]
 // `set_collection_behaviour` takes cocoa's `NSWindowCollectionBehavior`, which the
 // crate marks deprecated but still requires — scope the allow to this fn only.
 #[allow(deprecated)]
-fn make_panel(win: &tauri::WebviewWindow) {
+fn apply_panel_spaces_behaviour(panel: &tauri_nspanel::Panel) {
     use tauri_nspanel::cocoa::appkit::NSWindowCollectionBehavior;
+
+    // NSMainMenuWindowLevel (24) as a literal, avoiding the deprecated static.
+    const NS_MAIN_MENU_WINDOW_LEVEL: i32 = 24;
+
+    // Sit just above the menu bar so it's visible over fullscreen windows.
+    panel.set_level(NS_MAIN_MENU_WINDOW_LEVEL + 1);
+    panel.set_collection_behaviour(
+        NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces
+            | NSWindowCollectionBehavior::NSWindowCollectionBehaviorFullScreenAuxiliary
+            | NSWindowCollectionBehavior::NSWindowCollectionBehaviorStationary,
+    );
+}
+
+/// Convert the main window into a non-activating floating panel so it can overlay
+/// other apps' fullscreen Spaces (and appear on every Space) the way Raycast does.
+#[cfg(target_os = "macos")]
+fn make_panel(win: &tauri::WebviewWindow) {
     use tauri_nspanel::WebviewWindowExt;
 
     // NSWindowStyleMaskNonactivatingPanel — the panel takes key input without
@@ -264,18 +284,10 @@ fn make_panel(win: &tauri::WebviewWindow) {
     // NSWindowStyleMaskResizable — without this bit macOS blocks drag-to-resize,
     // so the resize cursor shows but the window won't actually resize.
     const RESIZABLE: i32 = 1 << 3;
-    // NSMainMenuWindowLevel (24) as a literal, avoiding the deprecated static.
-    const NS_MAIN_MENU_WINDOW_LEVEL: i32 = 24;
 
     if let Ok(panel) = win.to_panel() {
-        // Sit just above the menu bar so it's visible over fullscreen windows.
-        panel.set_level(NS_MAIN_MENU_WINDOW_LEVEL + 1);
         panel.set_style_mask(NONACTIVATING_PANEL | RESIZABLE);
-        panel.set_collection_behaviour(
-            NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces
-                | NSWindowCollectionBehavior::NSWindowCollectionBehaviorFullScreenAuxiliary
-                | NSWindowCollectionBehavior::NSWindowCollectionBehaviorStationary,
-        );
+        apply_panel_spaces_behaviour(&panel);
     }
 }
 
@@ -286,6 +298,7 @@ pub(crate) fn show_window(app: &AppHandle) {
     {
         use tauri_nspanel::ManagerExt;
         if let Ok(panel) = app.get_webview_panel("main") {
+            apply_panel_spaces_behaviour(&panel);
             panel.show();
             return;
         }
@@ -307,6 +320,7 @@ fn toggle_window(app: &AppHandle) {
             if panel.is_visible() {
                 panel.order_out(None);
             } else {
+                apply_panel_spaces_behaviour(&panel);
                 panel.show();
             }
             return;
